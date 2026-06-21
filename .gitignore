@@ -1,0 +1,16 @@
+# Build output
+target/
+e2e/target/
+
+# Quarkus
+.quarkus/
+
+# H2 I/O log database (created at runtime in the working directory)
+*.mv.db
+*.trace.db
+
+# Editor / OS
+*.iml
+.idea/
+.vscode/
+.DS_Store
