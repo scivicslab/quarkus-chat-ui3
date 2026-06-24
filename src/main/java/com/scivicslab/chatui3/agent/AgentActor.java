@@ -61,7 +61,11 @@ public class AgentActor extends IIActorRef<Object> {
           + "- Only after the tool results come back, write your final answer in plain text in this same\n"
           + "  turn. If you have nothing left to read, just answer.\n"
           + "- Every tool call requires a 'reason' argument: state, in one concise sentence, why THIS\n"
-          + "  call is needed now (what you are trying to find or verify). Make it specific, not boilerplate.";
+          + "  call is needed now (what you are trying to find or verify). Make it specific, not boilerplate.\n"
+          + "- 'read' reads DIRECTORIES too (recursively). To inspect or summarize a project/folder, call\n"
+          + "  read on the directory path itself — do NOT claim you cannot access it and do NOT ask the\n"
+          + "  user for individual file paths. Paths like ~/works/X, $HOME/works/X or an absolute path\n"
+          + "  all resolve into the working directory; pass them to read as given.";
 
     private final VllmClient vllmClient;
     private final ChatUiConfig config;
@@ -253,12 +257,15 @@ public class AgentActor extends IIActorRef<Object> {
 
     private static final List<Map<String, Object>> TOOLS = List.of(
             tool("read",
-                 "Read a file, or recursively a directory, under the working directory and return its "
-               + "text content. Use this to read the actual project files and documentation the user "
-               + "refers to.",
+                 "Read a file OR a whole directory (recursively) under the working directory and return "
+               + "its text. Directories ARE supported: pass a directory path to read every file under it "
+               + "(e.g. to summarize a project or folder). Use this to read the actual files/projects the "
+               + "user refers to; never tell the user you cannot access a path — just call read.",
                  "path",
-                 "Relative path under the working directory, e.g. docs/notes.md or "
-               + "doc_SCIVICS001/docs/CodingStandard/010_ProjectStandards"),
+                 "A path into the working directory (the user's ~/works). Accepts a relative path "
+               + "(e.g. POJO-actor or docs/notes.md), or a ~/works/... , $HOME/works/... , or absolute "
+               + "/home/.../works/... form — all resolve into the working directory. For a whole "
+               + "directory/project, pass the directory itself."),
             tool("calc",
                  "Evaluate a Java arithmetic expression and return its value. Always use this for "
                + "arithmetic instead of computing it yourself.",

@@ -27,6 +27,16 @@ public final class FileReadTool {
     /** Maximum number of files read for a directory. */
     static final int MAX_FILES = 1000;
 
+    /** Build/VCS/IDE/dependency directories skipped when reading a directory (noise, not source). */
+    static final java.util.Set<String> SKIP_DIRS = java.util.Set.of(
+            "target", "build", "dist", "out", "bin", "node_modules",
+            ".git", ".gradle", ".idea", ".mvn", ".vscode", ".settings");
+    /** File extensions skipped when reading a directory (binary / generated, not readable source). */
+    static final java.util.Set<String> SKIP_EXT = java.util.Set.of(
+            "class", "jar", "war", "ear", "zip", "gz", "tar", "tgz", "so", "o", "a", "dll", "exe",
+            "bin", "png", "jpg", "jpeg", "gif", "ico", "svg", "pdf", "woff", "woff2", "ttf", "eot",
+            "mp4", "mp3", "wav", "lock", "p12", "jks", "keystore");
+
     /**
      * Reads {@code input} (a path relative to {@code root}). Returns file/directory text, or an
      * {@code error: ...} string the agent feeds back as the Observation.
@@ -42,7 +52,11 @@ public final class FileReadTool {
         }
         try {
             Path base = root.toAbsolutePath().normalize();
-            Path target = base.resolve(input.trim()).normalize();
+            // Accept how users actually write paths: expand ~ and $HOME, and allow absolute paths.
+            // The confinement check below still restricts the result to the working directory, so this
+            // only changes how the path is spelled, not what may be read.
+            String p = expandHome(input.trim());
+            Path target = base.resolve(p).normalize();
             if (!Files.exists(target)) {
                 return "error: not found: " + input;
             }
@@ -61,10 +75,32 @@ public final class FileReadTool {
         }
     }
 
+    /** True if a file is inside a skipped directory or has a skipped (binary/generated) extension. */
+    static boolean isSkipped(Path dir, Path f) {
+        for (Path seg : dir.relativize(f)) {
+            if (SKIP_DIRS.contains(seg.toString())) return true;
+        }
+        String name = f.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 && SKIP_EXT.contains(name.substring(dot + 1).toLowerCase());
+    }
+
+    /** Expands a leading {@code ~} or {@code $HOME} to the user's home directory; leaves the rest as-is. */
+    static String expandHome(String p) {
+        String home = System.getProperty("user.home", "");
+        if (home.isEmpty()) return p;
+        if (p.equals("~") || p.equals("$HOME")) return home;
+        if (p.startsWith("~/")) return home + p.substring(1);
+        if (p.startsWith("$HOME/")) return home + p.substring(5);
+        return p;
+    }
+
     private static String readDirectory(Path base, Path dir, long maxChars, int maxFiles) throws IOException {
         List<Path> files;
         try (Stream<Path> walk = Files.walk(dir)) {
-            files = walk.filter(Files::isRegularFile).sorted().toList();
+            files = walk.filter(Files::isRegularFile)
+                    .filter(f -> !isSkipped(dir, f))   // drop build/VCS/binary noise (target/, .git/, *.class …)
+                    .sorted().toList();
         }
         StringBuilder sb = new StringBuilder();
         int count = 0;
