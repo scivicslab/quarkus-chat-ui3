@@ -85,8 +85,8 @@ public class AgentLoopRunner {
     }
 
     /** Starts the agent loop for one user message on a virtual thread (returns immediately). */
-    public void launch(String userMessage) {
-        Thread.ofVirtual().name("agent-loop").start(() -> run(userMessage));
+    public void launch(String userMessage, String source) {
+        Thread.ofVirtual().name("agent-loop").start(() -> run(userMessage, source));
     }
 
     /** Cancels the currently running agent loop (if any) by stopping its in-flight LLM turn. */
@@ -144,7 +144,7 @@ public class AgentLoopRunner {
         return new ActorNode(ref.getName(), type, ref.isAlive(), children);
     }
 
-    private void run(String userMessage) {
+    private void run(String userMessage, String source) {
         ActorRef<SseActor> sseRef = chatSystem.getSseActorRef();
         ChatUiConfig config;
         try {
@@ -192,7 +192,7 @@ public class AgentLoopRunner {
             // The agent actor drives the ReAct loop (think -> act -> observe). Its close() cancels
             // any in-flight LLM call on teardown; cancelCurrent() cancels it on user request.
             AgentActor agent = new AgentActor("agent", vllmClient, config, sseRef, conversation, system,
-                    ioLog, sessionId, contextWindow, mapper);
+                    ioLog, sessionId, contextWindow, mapper, source);
             system.addIIActor(agent);
             this.currentAgent = agent;   // expose for cancelCurrent()
 

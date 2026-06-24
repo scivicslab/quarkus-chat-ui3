@@ -58,9 +58,10 @@
             document.querySelectorAll('.rtab-content').forEach(function (c) {
                 c.classList.toggle('active', c.id === 'tab-' + tab);
             });
-            if (tab === 'logs') refreshLogs();
+            if (tab === 'trace') traceOnShow();
             if (tab === 'actors') refreshActors();
-            if (tab === 'io') ioOnShow();
+            if (tab === 'logdb') ioOnShow();
+            if (tab === 'syslog') refreshLogs();
         });
     }
 
@@ -285,9 +286,8 @@
 
     // ── I/O tab (complete I/O viewer: session -> agent -> filtered raw I/O) ────
     var ioSessionsLoaded = false;
-    var ioCurrentSession = null;
-    var ioCurrentAgent = '';   // '' = all agents
-    var ioTraceMode = false;   // false = raw entries, true = reconstructed agent-loop trace
+    var ioCurrentSession = null;   // shared by both tabs (only one is active at a time)
+    var ioCurrentAgent = '';   // '' = all agents (Log DB tab)
 
     function ioFilters() {
         return {
@@ -340,7 +340,6 @@
     function ioLoadLogs() {
         var entriesEl = document.getElementById('io-entries');
         if (!ioCurrentSession) { if (entriesEl) entriesEl.textContent = ''; ioSetStatus(''); return Promise.resolve(); }
-        if (ioTraceMode) return ioLoadTrace();
         var f = ioFilters();
         var qs = new URLSearchParams();
         if (ioCurrentAgent) qs.set('agent', ioCurrentAgent);
@@ -354,21 +353,53 @@
             .catch(function (err) { ioSetStatus('error: ' + err.message); });
     }
 
-    // Trace mode: reconstruct the agent loop (per turn) from the complete I/O log.
-    function ioLoadTrace() {
+    // ── Trace tab (agent-loop reconstruction: per-turn directional messages) ──
+    var traceSessionsLoaded = false;
+    function traceSetStatus(t) { var s = document.getElementById('trace-status'); if (s) s.textContent = t; }
+
+    function traceLoadSessions() {
+        return fetch('api/sessions').then(function (r) { return r.json(); }).then(function (list) {
+            var sel = document.getElementById('trace-session');
+            sel.textContent = '';
+            (list || []).forEach(function (s) {
+                var o = document.createElement('option');
+                o.value = s.sessionId;
+                o.textContent = '#' + s.sessionId + '  ' + (s.workflowName || '') + '  ' + (s.startedAt || '');
+                sel.appendChild(o);
+            });
+            traceSessionsLoaded = true;
+            ioCurrentSession = (list && list.length) ? String((sel.value = String(list[0].sessionId))) : null;
+        });
+    }
+
+    function traceLoad() {
+        var el = document.getElementById('trace-list');
+        if (!ioCurrentSession) { if (el) el.textContent = ''; traceSetStatus(''); return Promise.resolve(); }
         return fetch('api/sessions/' + ioCurrentSession + '/trace')
             .then(function (r) { return r.json(); })
             .then(function (turns) { ioRenderTrace(turns || []); })
-            .catch(function (err) { ioSetStatus('error: ' + err.message); });
+            .catch(function (err) { traceSetStatus('error: ' + err.message); });
+    }
+
+    function traceOnShow() {
+        var p = traceSessionsLoaded ? Promise.resolve() : traceLoadSessions();
+        p.then(function () { return traceLoad(); });
+    }
+
+    function initTrace() {
+        var sel = document.getElementById('trace-session');
+        if (sel) sel.addEventListener('change', function () { ioCurrentSession = sel.value; traceLoad(); });
+        var refresh = document.getElementById('trace-refresh');
+        if (refresh) refresh.addEventListener('click', function () { traceSessionsLoaded = false; traceOnShow(); });
     }
 
     function ioRenderTrace(turns) {
-        var el = document.getElementById('io-entries');
+        var el = document.getElementById('trace-list');
         el.textContent = '';
         if (!turns.length) {
             var none = document.createElement('div'); none.className = 'io-empty';
             none.textContent = 'No agent-loop trace in this session.'; el.appendChild(none);
-            ioSetStatus('0 turns'); return;
+            traceSetStatus('0 turns'); return;
         }
         var msgCount = 0;
         turns.forEach(function (t) {
@@ -381,7 +412,7 @@
             msgs.forEach(function (m) { box.appendChild(ioMsgEl(m)); });
             el.appendChild(box);
         });
-        ioSetStatus(turns.length + ' turn(s), ' + msgCount + ' messages');
+        traceSetStatus(turns.length + ' turn(s), ' + msgCount + ' messages');
     }
 
     // Flattens a turn into an ordered list of one-direction MESSAGES (the basic unit). Each log entry
@@ -517,13 +548,6 @@
         });
     }
 
-    function ioApplyMode() {
-        var btn = document.getElementById('io-mode');
-        if (btn) btn.classList.toggle('active', ioTraceMode);
-        var filters = document.querySelector('#tab-io .io-filters');
-        if (filters) filters.style.display = ioTraceMode ? 'none' : '';
-    }
-
     function ioRenderEntries(page) {
         var el = document.getElementById('io-entries');
         el.textContent = '';
@@ -621,10 +645,6 @@
         if (apply) apply.addEventListener('click', ioLoadLogs);
         var q = document.getElementById('io-q');
         if (q) q.addEventListener('keydown', function (e) { if (e.key === 'Enter') ioLoadLogs(); });
-        var mode = document.getElementById('io-mode');
-        if (mode) mode.addEventListener('click', function () {
-            ioTraceMode = !ioTraceMode; ioApplyMode(); ioLoadLogs();
-        });
     }
 
     // ── Right-pane config bar (live LLM settings via /api/config) ─────────────
@@ -682,6 +702,8 @@
         initLogs();
         initActors();
         initIo();
+        initTrace();
         initConfig();
+        traceOnShow();   // Trace is the default active tab; load it on startup.
     });
 })();

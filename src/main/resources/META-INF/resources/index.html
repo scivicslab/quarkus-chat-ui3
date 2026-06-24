@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css?v=15">
+    <link rel="stylesheet" href="console.css?v=19">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -23,38 +23,50 @@
       Everything from chat-ui's original <body> is kept verbatim inside #left-panel so app.js
       finds every element id it expects.
     -->
+    <!-- Global header spanning both panes: app-wide controls (title, theme, the effective model, status). -->
+    <div id="app-header">
+        <h1 id="app-title" contenteditable="true" spellcheck="false">LLM Console</h1>
+        <label id="theme-label">Theme:
+            <select id="theme-select">
+                <option value="dark-catppuccin">Dark Catppuccin</option>
+                <option value="dark-nord">Dark Nord</option>
+                <option value="dark-blue">Dark Blue</option>
+                <option value="dark-green">Dark Green</option>
+                <option value="dark-red">Dark Red</option>
+                <option value="light-clean">Light Clean</option>
+                <option value="light-warm">Light Warm</option>
+                <option value="light-blue">Light Blue</option>
+                <option value="light-green">Light Green</option>
+                <option value="light-red">Light Red</option>
+            </select>
+        </label>
+        <label id="hdr-model-label" title="Model used for requests (sets the server default via /api/config)">Model:
+            <select id="cfg-model"></select>
+        </label>
+        <label title="Sampling temperature. Lower (0–0.2) for code/deterministic, higher for varied prose.">Temp
+            <input id="cfg-temp" type="number" min="0" max="2" step="0.1"></label>
+        <label title="Max tokens for the model's REPLY (output length) — not the context window.">Max&nbsp;output
+            <input id="cfg-maxtokens" type="number" min="1" max="131072" step="256"></label>
+        <span id="activity-label"></span>
+        <span id="cfg-status"></span>
+        <span id="connection-status" class="disconnected">disconnected</span>
+    </div>
+
     <div id="console-root">
         <div id="left-panel">
             <!-- ===== BEGIN chat-ui markup (login/auth/extensions/predict/btw/think removed) ===== -->
             <div id="app" style="display:none">
                 <header>
-                    <h1 id="app-title" contenteditable="true" spellcheck="false">LLM Console - Claude</h1>
                     <div id="status-bar">
-                        <label id="theme-label">Theme:
-                            <select id="theme-select">
-                                <option value="dark-catppuccin">Dark Catppuccin</option>
-                                <option value="dark-nord">Dark Nord</option>
-                                <option value="dark-blue">Dark Blue</option>
-                                <option value="dark-green">Dark Green</option>
-                                <option value="dark-red">Dark Red</option>
-                                <option value="light-clean">Light Clean</option>
-                                <option value="light-warm">Light Warm</option>
-                                <option value="light-blue">Light Blue</option>
-                                <option value="light-green">Light Green</option>
-                                <option value="light-red">Light Red</option>
-                            </select>
-                        </label>
-                        <label id="model-label">Model:
-                            <select id="model-select">
-                                <!-- Populated dynamically from /api/models -->
-                            </select>
+                        <!-- Legacy chat-ui model selector, hidden: the effective model lives in the top
+                             header (#cfg-model). Kept in the DOM so chat-ui's app.js model code keeps working. -->
+                        <label id="model-label" style="display:none">
+                            <select id="model-select"></select>
                             <button id="refresh-models-btn" title="Refresh model list">&#x21bb;</button>
                         </label>
-                        <span id="activity-label"></span>
                         <button id="save-chat-btn" title="Save conversation as Markdown">Save Chat</button>
                         <button id="clear-chat-btn" title="Clear the on-screen view only — the model still remembers this conversation">Clear view</button>
                         <button id="new-conversation-btn" title="Start a new conversation — reset the model's memory and begin a new I/O-log session">New conversation</button>
-                        <span id="connection-status" class="disconnected">disconnected</span>
                     </div>
                 </header>
 
@@ -84,39 +96,24 @@
         <div id="splitter" title="Drag to resize"></div>
 
         <div id="right-panel">
-            <div id="right-config-bar" title="Live LLM settings — applied immediately via /api/config (reverts to application.properties defaults on restart)">
-                <label>Model <select id="cfg-model"></select></label>
-                <label>Temp <input id="cfg-temp" type="number" min="0" max="2" step="0.1"
-                    title="Sampling temperature. Lower (0–0.2) for code/deterministic, higher for varied prose."></label>
-                <label>Max&nbsp;output <input id="cfg-maxtokens" type="number" min="1" max="131072" step="256"
-                    title="Max tokens for the model's REPLY (output length) — not the context window."></label>
-                <span id="cfg-status"></span>
-            </div>
             <div id="right-tab-bar">
-                <button class="rtab-btn active" data-tab="logs">Logs</button>
+                <button class="rtab-btn active" data-tab="trace">Trace</button>
                 <button class="rtab-btn" data-tab="actors">Actors</button>
-                <button class="rtab-btn" data-tab="io">I/O</button>
+                <button class="rtab-btn" data-tab="logdb">Log DB</button>
+                <button class="rtab-btn" data-tab="syslog">System Log</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
             <div class="rtab-body">
-                <section id="tab-logs" class="rtab-content active">
+                <section id="tab-trace" class="rtab-content active">
                     <div class="tab-toolbar">
-                        <button id="logs-refresh" type="button">Refresh</button>
-                        <label class="tab-auto"><input type="checkbox" id="logs-auto" checked> Auto</label>
-                        <label class="tab-auto" title="Show this severity and above (filtered by numeric level value)">Level:
-                            <select id="logs-level">
-                                <option value="" selected>ALL</option>
-                                <option value="400">TRACE</option>
-                                <option value="500">DEBUG</option>
-                                <option value="800">INFO</option>
-                                <option value="900">WARN</option>
-                                <option value="1000">ERROR</option>
-                            </select>
+                        <label class="tab-auto">Session:
+                            <select id="trace-session"></select>
                         </label>
-                        <span id="logs-status"></span>
+                        <button id="trace-refresh" type="button">Refresh</button>
+                        <span id="trace-status"></span>
                     </div>
-                    <div id="logs-list"></div>
+                    <div id="trace-list"></div>
                 </section>
 
                 <section id="tab-actors" class="rtab-content">
@@ -128,13 +125,12 @@
                     <div id="actors-tree"></div>
                 </section>
 
-                <section id="tab-io" class="rtab-content">
+                <section id="tab-logdb" class="rtab-content">
                     <div class="tab-toolbar">
                         <label class="tab-auto">Session:
                             <select id="io-session"></select>
                         </label>
                         <button id="io-refresh" type="button">Refresh</button>
-                        <button id="io-mode" type="button" title="Toggle between raw entries and the reconstructed agent-loop trace">Trace</button>
                         <span id="io-status"></span>
                     </div>
                     <div id="io-body">
@@ -157,12 +153,31 @@
                         </div>
                     </div>
                 </section>
+
+                <section id="tab-syslog" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <button id="logs-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="logs-auto" checked> Auto</label>
+                        <label class="tab-auto" title="Show this severity and above (filtered by numeric level value)">Level:
+                            <select id="logs-level">
+                                <option value="" selected>ALL</option>
+                                <option value="400">TRACE</option>
+                                <option value="500">DEBUG</option>
+                                <option value="800">INFO</option>
+                                <option value="900">WARN</option>
+                                <option value="1000">ERROR</option>
+                            </select>
+                        </label>
+                        <span id="logs-status"></span>
+                    </div>
+                    <div id="logs-list"></div>
+                </section>
             </div>
         </div>
     </div>
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
-    <script src="app.js?v=46"></script>
-    <script src="console.js?v=15"></script>
+    <script src="app.js?v=47"></script>
+    <script src="console.js?v=16"></script>
 </body>
 </html>

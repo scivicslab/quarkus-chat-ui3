@@ -76,24 +76,49 @@ public class ConversationStore {
             out.add(message("system", systemPrompt));
         }
         for (Map<String, Object> m : turns) {
-            out.add(new LinkedHashMap<>(m));
+            out.add(cleanCopy(m));   // only role/content reach the LLM (drop our metadata, e.g. source)
         }
         out.add(message("user", currentUser));
         return out;
     }
 
-    /** Returns a copy of the committed user/assistant turns (no system prompt). */
+    /** Returns the committed user/assistant turns as clean {role,content} (no system prompt, no metadata). */
     public synchronized List<Map<String, Object>> historyTurns() {
         List<Map<String, Object>> out = new ArrayList<>(turns.size());
         for (Map<String, Object> m : turns) {
-            out.add(new LinkedHashMap<>(m));
+            out.add(cleanCopy(m));
         }
         return out;
     }
 
-    /** Commits a completed turn: appends the user message and the assistant reply as a pair. */
-    public synchronized void commitTurn(String user, String assistant) {
-        turns.add(message("user", user));
+    /** One committed turn for the chat view: its number, the question (+ who sent it), and the answer. */
+    public record Turn(int turn, String question, String source, String answer) {}
+
+    /**
+     * The conversation as the model actually has it (the authoritative context), for rendering the
+     * left chat pane. Each pair becomes one numbered turn; {@code source} records who entered the
+     * prompt ({@code "browser"} = the user in this UI, anything else e.g. {@code "api"} = entered by
+     * another client), or null for older turns recorded before sources were tracked.
+     */
+    public synchronized List<Turn> conversation() {
+        List<Turn> out = new ArrayList<>();
+        for (int i = 0; i + 1 < turns.size(); i += 2) {
+            Map<String, Object> u = turns.get(i);
+            Map<String, Object> a = turns.get(i + 1);
+            Object src = u.get("source");
+            out.add(new Turn(i / 2 + 1, str(u.get("content")),
+                    src == null ? null : src.toString(), str(a.get("content"))));
+        }
+        return out;
+    }
+
+    /** Commits a completed turn: appends the user message (tagged with its source) and the reply. */
+    public synchronized void commitTurn(String user, String assistant, String source) {
+        Map<String, Object> u = message("user", user);
+        if (source != null && !source.isBlank()) {
+            u.put("source", source);   // our own metadata; stripped before the map reaches the LLM
+        }
+        turns.add(u);
         turns.add(message("assistant", assistant));
         persist();
     }
@@ -210,4 +235,14 @@ public class ConversationStore {
         m.put("content", content);
         return m;
     }
+
+    /** A {role,content}-only copy of a stored turn map, dropping any metadata (e.g. source). */
+    private static Map<String, Object> cleanCopy(Map<String, Object> m) {
+        return message(str(m.get("role")), str(m.get("content")));
+    }
+
+    private static String str(Object o) {
+        return o == null ? "" : o.toString();
+    }
 }
+

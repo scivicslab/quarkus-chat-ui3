@@ -75,14 +75,19 @@ public class ChatResource {
         // Map<String,Object> so the browser's boolean fields (e.g. noThink) deserialize cleanly.
         Object textVal    = body != null ? body.get("text") : null;
         Object messageVal = body != null ? body.get("message") : null;
+        Object sourceVal  = body != null ? body.get("source") : null;
         String text    = textVal != null ? String.valueOf(textVal) : null;
         String message = messageVal != null ? String.valueOf(messageVal) : null;
+        // Who entered this prompt: the browser UI sends source="browser"; any other client (e.g. a
+        // direct API/curl call) typically omits it, so default to "api" to mark non-UI input.
+        String source  = (sourceVal != null && !String.valueOf(sourceVal).isBlank())
+                ? String.valueOf(sourceVal) : "api";
 
         // Always return a JSON body: the browser does `await response.json()`, so an empty
         // body throws "Unexpected end of JSON input". The turn's content arrives via SSE; this
         // response only acknowledges acceptance.
         if (text != null && !text.isBlank()) {
-            agentLoopRunner.launch(text);
+            agentLoopRunner.launch(text, source);
             return Response.ok(Map.of("type", "accepted")).build();
         }
         if (message != null && !message.isBlank()) {
@@ -135,6 +140,18 @@ public class ChatResource {
     }
 
     // ── History ───────────────────────────────────────────────────────────────
+
+    /**
+     * The conversation as the model actually has it (server-authoritative context), so the chat pane
+     * can render exactly what is in context — including turns entered by non-UI clients. Each turn
+     * carries its number and the prompt's source.
+     */
+    @GET
+    @Path("/conversation")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<ConversationStore.Turn> conversation() {
+        return conversation.conversation();
+    }
 
     @DELETE
     @Path("/history")

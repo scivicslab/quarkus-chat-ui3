@@ -700,6 +700,7 @@
             chatHistory.push({ role: 'assistant', text: currentAssistantText });
             currentAssistantText = '';
             needsParagraphBreak = false;
+            turnCounter++;   // this turn is now committed server-side; keep the counter in sync
             saveHistory();
             scrollToBottom();
             trimChatArea();
@@ -980,6 +981,69 @@
                 localStorage.setItem(HISTORY_KEY, JSON.stringify(chatHistory.slice(-50)));
             } catch (e2) { /* give up */ }
         }
+    }
+
+    // Conversation turn counter, kept in sync with the server's committed turns so the left pane can
+    // label each turn (matching the Trace's "Turn N"). Set on hydrate, bumped on each completed turn.
+    var turnCounter = 0;
+
+    // A small header for a user turn: its number (matches Trace "Turn N") and, when the prompt was
+    // NOT entered in this browser, a "via <source>" tag so non-UI input is visible.
+    function turnBadgeEl(turnNo, source) {
+        var b = document.createElement('div'); b.className = 'turn-badge';
+        var n = document.createElement('span'); n.className = 'turn-no';
+        n.textContent = 'Turn ' + turnNo;
+        b.appendChild(n);
+        if (source && source !== 'browser') {
+            var s = document.createElement('span'); s.className = 'turn-src';
+            s.textContent = 'via ' + source;
+            b.appendChild(s);
+        }
+        return b;
+    }
+
+    // Appends a user message bubble with its turn badge (used by both live sends and server hydration).
+    function appendUserTurn(text, turnNo, source) {
+        var div = document.createElement('div'); div.className = 'message user';
+        div.appendChild(turnBadgeEl(turnNo, source));
+        var body = document.createElement('div'); body.className = 'msg-body'; body.textContent = text;
+        div.appendChild(body);
+        var footer = document.createElement('div'); footer.className = 'message-footer';
+        var ts = document.createElement('span'); ts.textContent = formatTime(new Date());
+        footer.appendChild(ts);
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-md-btn'; copyBtn.textContent = 'Copy'; copyBtn.title = 'Copy prompt text';
+        copyBtn.addEventListener('click', function () {
+            navigator.clipboard.writeText(text).then(function () {
+                copyBtn.textContent = 'Copied!'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500);
+            });
+        });
+        footer.appendChild(copyBtn); div.appendChild(footer);
+        chatArea.appendChild(div);
+        chatHistory.push({ role: 'user', text: text });
+        saveHistory(); scrollToBottom(); trimChatArea();
+        return div;
+    }
+
+    // Render the left pane from the SERVER's authoritative conversation (ConversationStore) so the chat
+    // always reflects what the model actually has in context — including turns entered by non-UI
+    // clients (which carry a "via api" tag). Falls back to the localStorage cache if unavailable/empty.
+    function hydrateConversation() {
+        return fetch(apiUrl('api/conversation'))
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .then(function (turns) {
+                if (!Array.isArray(turns) || !turns.length) { restoreHistory(); return; }
+                chatArea.innerHTML = ''; chatHistory = [];
+                turns.forEach(function (t) {
+                    appendUserTurn(t.question, t.turn, t.source);
+                    chatArea.appendChild(createAssistantDiv(t.answer));
+                    chatHistory.push({ role: 'assistant', text: t.answer });
+                });
+                saveHistory();
+                turnCounter = turns[turns.length - 1].turn;
+                scrollToBottom();
+            })
+            .catch(function () { restoreHistory(); });
     }
 
     function restoreHistory() {
@@ -1481,8 +1545,8 @@
     }
 
     async function executePrompt(text) {
-        // Display user message
-        appendMessage('user', text);
+        // Display user message with its turn number (this browser = source "browser").
+        appendUserTurn(text, turnCounter + 1, 'browser');
         busy = true;
         cancelBtn.disabled = false;
 
@@ -1501,7 +1565,7 @@
             var response = await fetch(apiUrl('api/chat'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text, model: modelSelect.value, noThink: !(document.getElementById('think-check') || {checked: true}).checked })
+                body: JSON.stringify({ text: text, source: 'browser', model: modelSelect.value, noThink: !(document.getElementById('think-check') || {checked: true}).checked })
             });
             if (!response.ok) {
                 stopThinkingTimer();
@@ -1637,6 +1701,7 @@
     // I/O-log session (DELETE /api/history). The next turn begins a fresh memory and a new session.
     document.getElementById('new-conversation-btn').addEventListener('click', function () {
         resetView();
+        turnCounter = 0;   // new conversation: turns restart at 1
         fetch(apiUrl('api/history'), { method: 'DELETE' }).catch(function () { /* best-effort */ });
     });
 
@@ -1678,7 +1743,7 @@
 
     // --- Initial data load ---
     loadModels();
-    restoreHistory();
+    hydrateConversation();   // render the left pane from the server's authoritative conversation
     restoreQueue();
     connectSSE();
     promptInput.focus();

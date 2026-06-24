@@ -79,6 +79,10 @@ public class AgentActor extends IIActorRef<Object> {
     // for the whole turn so JShell.create() is paid at most once, then closed with the actor.
     private JShellCalculator calc;
 
+    // Who entered this turn's prompt ("browser" = the UI user, else e.g. "api"). Recorded with the
+    // committed turn so the chat view can show prompts entered by non-UI clients.
+    private final String source;
+
     // per-turn working memory
     private String question;
     private int turnNo;   // conversation turn number, for labelling I/O log entries
@@ -94,7 +98,7 @@ public class AgentActor extends IIActorRef<Object> {
 
     public AgentActor(String name, VllmClient vllmClient, ChatUiConfig config,
             ActorRef<SseActor> sseRef, ConversationStore conversation, IIActorSystem system,
-            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper) {
+            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source) {
         super(name, new Object(), system);
         this.vllmClient    = vllmClient;
         this.config        = config;
@@ -104,6 +108,7 @@ public class AgentActor extends IIActorRef<Object> {
         this.sessionId     = sessionId;
         this.contextWindow = contextWindow;
         this.mapper        = mapper;
+        this.source        = source;
     }
 
     /** Initialises the turn from the user's message. */
@@ -220,7 +225,7 @@ public class AgentActor extends IIActorRef<Object> {
         String answer = finalAnswer;
         sseRef.tell(a -> a.emit(ChatEvent.delta(answer)));
         sseRef.tell(a -> a.emit(ChatEvent.result(answer)));
-        conversation.commitTurn(question, answer);
+        conversation.commitTurn(question, answer, source);
         return new ActionResult(true, "finished");
     }
 
