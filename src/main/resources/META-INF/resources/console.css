@@ -305,3 +305,43 @@
 .tr-obs { margin-top: 3px; color: var(--text-secondary, #8a8a8a); font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 .tr-empty-reason { margin-top: 3px; color: var(--text-secondary, #6f6f6f); font-style: italic; font-size: 11px; }
 .tr-user { padding: 7px 10px; color: var(--text-primary, #e6e6e6); background: rgba(99,102,241,0.07); border-bottom: 1px solid var(--border-color, #232323); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.tr-full { margin-top: 6px; }
+.tr-full > summary { display: inline-block; cursor: pointer; user-select: none; font-size: 11px; padding: 2px 8px; border: 1px solid var(--border-color, #3a3a3a); border-radius: 10px; background: var(--bg-tertiary, #262626); color: var(--text-secondary, #9aa0a6); list-style: none; }
+.tr-full > summary::-webkit-details-marker { display: none; }
+.tr-full > summary:hover { border-color: var(--accent-blue, #6366f1); color: var(--text-primary, #d8d8d8); }
+.tr-full[open] > summary { background: var(--accent-blue, #4f46e5); color: #fff; border-color: var(--accent-blue, #4f46e5); }
+.tr-full-body { margin: 4px 0 0; padding: 8px 10px; background: var(--bg-primary, #141414); border: 1px solid var(--border-color, #2a2a2a); border-radius: 4px; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 11px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; color: var(--text-primary, #d0d0d0); max-height: 360px; overflow: auto; }
+.tr-reason { margin-top: 4px; color: var(--accent-green, #6ee7b7); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.tr-turn > .tr-full { padding: 6px 10px 2px; }
+
+/* ── Trace full-entry: directional sections (who -> whom), color-coded ── */
+.tr-full-holder { margin-top: 4px; }
+.tr-sec { margin: 6px 0; border-left: 3px solid var(--border-color, #444); padding-left: 8px; }
+.tr-sec-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 3px; }
+.tr-sec-title { font-size: 11px; font-weight: 600; color: var(--text-primary, #d8d8d8); }
+.tr-sec-dir { font-size: 10px; padding: 1px 7px; border-radius: 9px; white-space: nowrap; }
+.tr-sec.to-llm   { border-left-color: #6366f1; }
+.tr-sec.to-llm   .tr-sec-dir { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+.tr-sec.from-llm { border-left-color: #22c55e; }
+.tr-sec.from-llm .tr-sec-dir { background: rgba(34,197,94,0.16); color: #6ee7b7; }
+.tr-sec.to-tool  { border-left-color: #f59e0b; }
+.tr-sec.to-tool  .tr-sec-dir { background: rgba(245,158,11,0.16); color: #fbbf24; }
+.tr-sec.from-tool{ border-left-color: #14b8a6; }
+.tr-sec.from-tool .tr-sec-dir { background: rgba(20,184,166,0.16); color: #5eead4; }
+.tr-sec.meta     { border-left-color: #6b7280; }
+.tr-sec.meta     .tr-sec-dir { background: rgba(107,114,128,0.18); color: #b8b8b8; }
+
+/* ── Trace: directional MESSAGE rows (summary + click → that message's full text) ── */
+.trm { border-left: 3px solid var(--border-color, #444); margin: 4px 0; border-radius: 0 4px 4px 0; background: var(--bg-secondary, #1b1b1b); }
+.trm > summary { display: flex; gap: 10px; align-items: baseline; cursor: pointer; user-select: none; padding: 6px 10px; list-style: none; }
+.trm > summary::-webkit-details-marker { display: none; }
+.trm-dir { flex-shrink: 0; font-size: 10px; padding: 1px 7px; border-radius: 9px; white-space: nowrap; font-family: "SFMono-Regular", Consolas, monospace; }
+.trm-txt { font-size: 12px; color: var(--text-primary, #d4d4d4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trm[open] > summary .trm-txt { white-space: normal; word-break: break-word; }
+.trm > summary:hover .trm-txt { color: #fff; }
+.trm-body { padding: 0 10px 8px; }
+.trm.user      { border-left-color: #a78bfa; } .trm.user .trm-dir      { background: rgba(167,139,250,.18); color: #c4b5fd; }
+.trm.to-llm    { border-left-color: #6366f1; } .trm.to-llm .trm-dir    { background: rgba(99,102,241,.18); color: #a5b4fc; }
+.trm.from-llm  { border-left-color: #22c55e; } .trm.from-llm .trm-dir  { background: rgba(34,197,94,.16);  color: #6ee7b7; }
+.trm.to-tool   { border-left-color: #f59e0b; } .trm.to-tool .trm-dir   { background: rgba(245,158,11,.16); color: #fbbf24; }
+.trm.from-tool { border-left-color: #14b8a6; } .trm.from-tool .trm-dir { background: rgba(20,184,166,.16); color: #5eead4; }

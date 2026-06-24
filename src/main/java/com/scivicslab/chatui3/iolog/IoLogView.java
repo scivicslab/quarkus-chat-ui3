@@ -65,9 +65,9 @@ public class IoLogView {
      * (the turn's answer). A {@code tool} step carries the executed {@code toolName}/{@code toolInput}
      * and a short {@code observation} digest plus the full {@code obsChars} size.
      */
-    public record TraceStep(String label, String kind, String thought, String toolCalls,
-                            String toolName, String toolInput, String observation, int obsChars,
-                            int promptTokens, int completionTokens, boolean finalAnswer) {}
+    public record TraceStep(long id, String label, String kind, String thought, String toolCalls,
+                            String reason, String toolName, String toolInput, String observation,
+                            int obsChars, int promptTokens, int completionTokens, boolean finalAnswer) {}
 
     /**
      * One conversation turn: the user's prompt (the loop's starting point) and the ordered trace steps
@@ -148,13 +148,14 @@ public class IoLogView {
                 String name = between(msg, "TOOL:", "INPUT:", "OBSERVATION:");
                 String input = between(msg, "INPUT:", "OBSERVATION:");
                 String obs = between(msg, "OBSERVATION:");
-                step = new TraceStep(nz(e.getLabel()), "tool", "", "", name, input,
+                step = new TraceStep(e.getId(), nz(e.getLabel()), "tool", "", "", "", name, input,
                         digest(obs), obs.length(), -1, -1, false);
             } else {
                 String thought = between(msg, "RESPONSE:", "REASONING:", "TOOL_CALLS:", "USAGE:");
                 String toolCalls = between(msg, "TOOL_CALLS:", "USAGE:");
                 boolean finalAnswer = toolCalls.isBlank();
-                step = new TraceStep(nz(e.getLabel()), "llm", thought, toolCalls, "", "", "", 0,
+                step = new TraceStep(e.getId(), nz(e.getLabel()), "llm", thought, toolCalls,
+                        extractReasons(toolCalls), "", "", "", 0,
                         parseTokenCount(msg, "promptTokens="), parseTokenCount(msg, "completionTokens="),
                         finalAnswer);
                 // The current user question is the loop's starting point: pull it once per turn from
@@ -169,6 +170,28 @@ public class IoLogView {
                 .map(en -> new TraceTurn(en.getKey(), userPrompts.getOrDefault(en.getKey(), ""), en.getValue()))
                 .sorted(Comparator.comparingInt(TraceTurn::turn))
                 .toList();
+    }
+
+    /**
+     * Extracts the {@code reason} argument(s) from a logged TOOL_CALLS section (one {@code <name> {json}}
+     * per line) and joins them. Empty when there is no reason (e.g. older calls before reasons were
+     * required). Pure.
+     */
+    static String extractReasons(String toolCallsText) {
+        if (toolCallsText == null || toolCallsText.isBlank()) return "";
+        java.util.List<String> reasons = new java.util.ArrayList<>();
+        for (String line : toolCallsText.split("\n")) {
+            int b = line.indexOf('{');
+            if (b < 0) continue;
+            try {
+                com.fasterxml.jackson.databind.JsonNode args = TRACE_MAPPER.readTree(line.substring(b));
+                String r = args.path("reason").asText("");
+                if (!r.isBlank()) reasons.add(r);
+            } catch (Exception ignore) {
+                // malformed line: skip, keep any reasons already parsed
+            }
+        }
+        return String.join("  /  ", reasons);
     }
 
     /** Shared read-only parser for pulling the user prompt out of a stored REQUEST body. */

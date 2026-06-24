@@ -183,6 +183,7 @@ class IoLogViewTest {
         assertEquals(3, t.steps().size());
 
         IoLogView.TraceStep s1 = t.steps().get(0);   // llm: bare tool call, no thought
+        assertEquals(raw.get(0).getId(), s1.id());    // carries the entry id for full-entry drill-down
         assertEquals("llm", s1.kind());
         assertEquals("", s1.thought());
         assertTrue(s1.toolCalls().contains("read"));
@@ -199,6 +200,17 @@ class IoLogViewTest {
         IoLogView.TraceStep s3 = t.steps().get(2);   // llm: final answer (no tool calls)
         assertEquals("The answer is foo.", s3.thought());
         assertTrue(s3.finalAnswer());
+    }
+
+    @Test
+    @DisplayName("extractReasons: pulls the reason argument(s) from a TOOL_CALLS section")
+    void extractReasons_pullsReasons() {
+        String tc = "read {\"reason\": \"need the directory listing\", \"path\": \"docs\"}\n"
+                  + "read {\"reason\": \"check the second folder too\", \"path\": \"docs2\"}";
+        assertEquals("need the directory listing  /  check the second folder too",
+                IoLogView.extractReasons(tc));
+        assertEquals("", IoLogView.extractReasons("read {\"path\": \"docs\"}"));   // no reason field
+        assertEquals("", IoLogView.extractReasons(""));
     }
 
     @Test

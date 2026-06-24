@@ -59,7 +59,9 @@ public class AgentActor extends IIActorRef<Object> {
           + "  tool for EVERY one of them (you may request several tool calls at once). Do this BEFORE\n"
           + "  writing any prose. Read happens inside this same reply via the tool, not 'later'.\n"
           + "- Only after the tool results come back, write your final answer in plain text in this same\n"
-          + "  turn. If you have nothing left to read, just answer.";
+          + "  turn. If you have nothing left to read, just answer.\n"
+          + "- Every tool call requires a 'reason' argument: state, in one concise sentence, why THIS\n"
+          + "  call is needed now (what you are trying to find or verify). Make it specific, not boilerplate.";
 
     private final VllmClient vllmClient;
     private final ChatUiConfig config;
@@ -258,18 +260,28 @@ public class AgentActor extends IIActorRef<Object> {
                  "expression",
                  "A Java expression, e.g. 23*47 or Math.sqrt(16) or (1000.0/3)"));
 
-    /** Builds one OpenAI tool schema with a single required string parameter. */
+    /**
+     * Builds one OpenAI tool schema with a required {@code reason} parameter (why this call is being
+     * made now) followed by the tool's operative string parameter. {@code reason} is listed first and
+     * required so the model verbalizes its justification with every call — captured in the I/O log and
+     * surfaced in the trace.
+     */
     private static Map<String, Object> tool(String name, String description,
             String paramName, String paramDesc) {
+        Map<String, Object> reason = new LinkedHashMap<>();
+        reason.put("type", "string");
+        reason.put("description", "Why you are calling this tool now, given the user's request and what "
+                + "you have read so far. One concise sentence.");
         Map<String, Object> param = new LinkedHashMap<>();
         param.put("type", "string");
         param.put("description", paramDesc);
         Map<String, Object> props = new LinkedHashMap<>();
+        props.put("reason", reason);   // first, so the model states its reason before the argument
         props.put(paramName, param);
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("type", "object");
         params.put("properties", props);
-        params.put("required", List.of(paramName));
+        params.put("required", List.of("reason", paramName));
         Map<String, Object> fn = new LinkedHashMap<>();
         fn.put("name", name);
         fn.put("description", description);

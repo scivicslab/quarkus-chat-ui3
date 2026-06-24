@@ -370,55 +370,151 @@
             none.textContent = 'No agent-loop trace in this session.'; el.appendChild(none);
             ioSetStatus('0 turns'); return;
         }
-        var steps = 0;
+        var msgCount = 0;
         turns.forEach(function (t) {
-            steps += (t.steps || []).length;
             var box = document.createElement('div'); box.className = 'tr-turn';
             var head = document.createElement('div'); head.className = 'tr-turn-head';
             head.textContent = 'Turn ' + t.turn;
             box.appendChild(head);
-            // The user's prompt is the loop's starting point — show it first so the turn reads top-down.
-            var u = document.createElement('div'); u.className = 'tr-user';
-            u.textContent = '🗣 ' + (t.userPrompt ? t.userPrompt : '(user prompt not found)');
-            box.appendChild(u);
-            (t.steps || []).forEach(function (s) { box.appendChild(ioTraceStepEl(s)); });
+            var msgs = ioTurnMessages(t);
+            msgCount += msgs.length;
+            msgs.forEach(function (m) { box.appendChild(ioMsgEl(m)); });
             el.appendChild(box);
         });
-        ioSetStatus(turns.length + ' turn(s), ' + steps + ' step(s)');
+        ioSetStatus(turns.length + ' turn(s), ' + msgCount + ' messages');
     }
 
-    function ioTraceStepEl(s) {
-        var row = document.createElement('div'); row.className = 'tr-step tr-' + s.kind;
-        if (s.kind === 'tool') {
-            var call = document.createElement('div'); call.className = 'tr-line tr-toolexec';
-            call.textContent = '↳ ' + s.toolName + '(' + s.toolInput + ')';
-            row.appendChild(call);
-            var obs = document.createElement('div'); obs.className = 'tr-obs';
-            obs.textContent = '→ ' + s.observation + ' …  [' + s.obsChars + ' chars]';
-            row.appendChild(obs);
-            return row;
+    // Flattens a turn into an ordered list of one-direction MESSAGES (the basic unit). Each log entry
+    // splits into its two directions: an llm entry -> (loop→LLM request) + (LLM→loop reply); a tool
+    // entry -> (loop→tool input) + (tool→loop observation). The user prompt opens the turn.
+    function ioTurnMessages(t) {
+        var out = [];
+        var firstLlm = (t.steps || []).filter(function (s) { return s.kind === 'llm'; })[0];
+        out.push({ dir: 'user → loop', cls: 'user',
+                   summary: '🗣 ' + (t.userPrompt || '(user prompt not found)'),
+                   id: firstLlm ? firstLlm.id : -1, part: 'USER' });
+        (t.steps || []).forEach(function (s) {
+            if (s.kind === 'tool') {
+                out.push({ dir: 'loop → tool', cls: 'to-tool',
+                           summary: '↳ ' + s.toolName + '(' + s.toolInput + ')', id: s.id, part: 'INPUT' });
+                out.push({ dir: 'tool → loop', cls: 'from-tool',
+                           summary: '→ ' + s.observation + ' …  [' + s.obsChars + ' chars]', id: s.id, part: 'OBSERVATION' });
+                return;
+            }
+            // llm entry → two messages: the request we sent, and the model's reply.
+            var tokIn = (typeof s.promptTokens === 'number' && s.promptTokens >= 0) ? (' · ' + s.promptTokens + ' tok in') : '';
+            out.push({ dir: 'loop → LLM', cls: 'to-llm',
+                       summary: 'request' + tokIn + '  (system + history + user + tools offered)', id: s.id, part: 'REQUEST' });
+            var reply;
+            if (s.toolCalls) {
+                reply = '🔧 ' + s.toolCalls.replace(/\s+/g, ' ').trim();
+                if (s.reason) reply += '   💡 ' + s.reason;
+            } else {
+                reply = '💬 ' + (s.thought || '(empty)');
+            }
+            var tokOut = (typeof s.completionTokens === 'number' && s.completionTokens >= 0) ? ('  ·  ' + s.completionTokens + ' tok out') : '';
+            out.push({ dir: 'LLM → loop', cls: 'from-llm', summary: reply + tokOut, id: s.id, part: 'RESPONSE' });
+        });
+        return out;
+    }
+
+    // One directional message: a summary line (with its "who → whom" tag + color) that expands to show
+    // ONLY that direction's full text, fetched lazily from the source log entry.
+    function ioMsgEl(m) {
+        var det = document.createElement('details'); det.className = 'trm ' + m.cls;
+        var sum = document.createElement('summary'); sum.className = 'trm-sum';
+        var dir = document.createElement('span'); dir.className = 'trm-dir'; dir.textContent = m.dir;
+        var txt = document.createElement('span'); txt.className = 'trm-txt'; txt.textContent = m.summary;
+        sum.appendChild(dir); sum.appendChild(txt);
+        det.appendChild(sum);
+        var body = document.createElement('div'); body.className = 'trm-body'; body.textContent = 'loading…';
+        det.appendChild(body);
+        var loaded = false;
+        det.addEventListener('toggle', function () {
+            if (!det.open || loaded) return;
+            loaded = true;
+            if (m.id < 0) { body.textContent = '(no source entry)'; return; }
+            fetch('api/sessions/' + ioCurrentSession + '/entry/' + m.id)
+                .then(function (r) { return r.json(); })
+                .then(function (d) { ioRenderPart(body, d.message || '', m.part); })
+                .catch(function (err) { body.textContent = 'error: ' + err.message; loaded = false; });
+        });
+        return det;
+    }
+
+    // Renders ONLY the sections belonging to one direction (part) of a source entry into `holder`.
+    function ioRenderPart(holder, message, part) {
+        holder.textContent = '';
+        var sections;
+        if (part === 'USER') {
+            sections = [{ spec: { t: 'user message', cls: 'user' }, body: ioUserMessageOf(message) }];
+        } else {
+            var kind = (part === 'INPUT' || part === 'OBSERVATION') ? 'tool' : 'llm';
+            var want = { REQUEST: ['REQUEST'], RESPONSE: ['RESPONSE', 'REASONING', 'TOOL_CALLS'],
+                         INPUT: ['TOOL', 'INPUT'], OBSERVATION: ['OBSERVATION'] }[part] || [];
+            sections = ioSplitEntry(message, kind).filter(function (sec) {
+                return want.indexOf(sec.spec.k.slice(0, -1)) >= 0;
+            });
         }
-        // llm step
-        var tok = (typeof s.promptTokens === 'number' && s.promptTokens >= 0)
-            ? '  ·  ' + s.promptTokens + '→' + s.completionTokens + ' tok' : '';
-        var line = document.createElement('div'); line.className = 'tr-line';
-        line.textContent = (s.finalAnswer ? '💬 answer' : '💭 step') + tok;
-        row.appendChild(line);
-        if (s.toolCalls) {
-            var tc = document.createElement('div'); tc.className = 'tr-toolcall';
-            tc.textContent = '🔧 ' + s.toolCalls;
-            row.appendChild(tc);
+        if (!sections.length) {
+            var pre0 = document.createElement('pre'); pre0.className = 'tr-full-body'; pre0.textContent = '(empty)';
+            holder.appendChild(pre0); return;
         }
-        if (s.thought) {
-            var th = document.createElement('div'); th.className = 'tr-thought';
-            th.textContent = s.thought;
-            row.appendChild(th);
-        } else if (s.toolCalls) {
-            var no = document.createElement('div'); no.className = 'tr-empty-reason';
-            no.textContent = '(no verbalized reason — the model called the tool directly)';
-            row.appendChild(no);
-        }
-        return row;
+        sections.forEach(function (sec) {
+            var block = document.createElement('div'); block.className = 'tr-sec ' + (sec.spec.cls || '');
+            var h = document.createElement('div'); h.className = 'tr-sec-head';
+            var tt = document.createElement('span'); tt.className = 'tr-sec-title'; tt.textContent = sec.spec.t;
+            h.appendChild(tt);
+            var pre = document.createElement('pre'); pre.className = 'tr-full-body';
+            var b = sec.body;
+            if (sec.spec.json) { try { b = JSON.stringify(JSON.parse(b), null, 2); } catch (e) { /* keep raw */ } }
+            pre.textContent = b ? b : '(empty)';
+            block.appendChild(h); block.appendChild(pre);
+            holder.appendChild(block);
+        });
+    }
+
+    // Pulls the current user question (the last user message) out of an entry's REQUEST json.
+    function ioUserMessageOf(message) {
+        var req = ioSplitEntry(message, 'llm').filter(function (s) { return s.spec.k === 'REQUEST:'; })[0];
+        if (!req) return '';
+        try {
+            var msgs = (JSON.parse(req.body).messages) || [];
+            var last = '';
+            msgs.forEach(function (mm) { if (mm.role === 'user') last = mm.content || ''; });
+            return last;
+        } catch (e) { return ''; }
+    }
+
+    // The labeled sections of a stored entry, in order, each tagged with its direction (who -> whom)
+    // so a single round-trip is NOT shown as one undifferentiated blob.
+    function ioEntrySections(kind) {
+        if (kind === 'tool') return [
+            { k: 'TOOL:',        t: 'TOOL (name)',          d: 'agent loop → tool (Java)', cls: 'to-tool' },
+            { k: 'INPUT:',       t: 'INPUT (arguments)',    d: 'agent loop → tool (Java)', cls: 'to-tool' },
+            { k: 'OBSERVATION:', t: 'OBSERVATION (result)', d: 'tool (Java) → agent loop', cls: 'from-tool' }
+        ];
+        return [
+            { k: 'REQUEST:',     t: 'REQUEST (system + history + user + tools offered)', d: 'agent loop → LLM', cls: 'to-llm', json: true },
+            { k: 'RESPONSE:',    t: 'RESPONSE (assistant text)', d: 'LLM → agent loop', cls: 'from-llm' },
+            { k: 'REASONING:',   t: 'REASONING (chain of thought)', d: 'LLM → agent loop', cls: 'from-llm' },
+            { k: 'TOOL_CALLS:',  t: 'TOOL_CALLS (functions the model asked to run)', d: 'LLM → agent loop', cls: 'from-llm' },
+            { k: 'USAGE:',       t: 'USAGE (token counts)', d: 'LLM server · metadata', cls: 'meta' }
+        ];
+    }
+
+    // Splits a stored entry message into its directional sections (markers appear once, in order).
+    function ioSplitEntry(message, kind) {
+        var specs = ioEntrySections(kind);
+        var found = [], cursor = 0;
+        specs.forEach(function (s) {
+            var i = message.indexOf(s.k, cursor);
+            if (i >= 0) { found.push({ spec: s, mark: i, start: i + s.k.length }); cursor = i + s.k.length; }
+        });
+        return found.map(function (f, j) {
+            var end = (j + 1 < found.length) ? found[j + 1].mark : message.length;
+            return { spec: f.spec, body: message.substring(f.start, end).trim() };
+        });
     }
 
     function ioApplyMode() {
