@@ -1,11 +1,27 @@
 package com.scivicslab.chatui3.context;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scivicslab.chatui3.iolog.IoLogStore;
+import io.quarkus.runtime.StartupEvent;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
+import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Server-side session conversation history for the browser agent loop (entry B).
@@ -17,13 +33,38 @@ import java.util.Map;
  * pair ({@link #commitTurn}) — so the history is always a well-formed alternating sequence. A turn
  * that errors or is cancelled commits nothing, leaving no dangling user message.</p>
  *
+ * <p><b>Persistence / restart-resume.</b> The conversation is a small, purpose-built store of just
+ * the confirmed turns, persisted to H2 (one row, table {@code conversation_state}) so it survives a
+ * restart. On startup the turns are reloaded and the matching I/O-log session is resumed
+ * ({@link IoLogStore#resumeSession}), so the conversation continues in the same session rather than
+ * starting fresh. This is deliberately a separate store from the complete I/O log (see
+ * {@code ConversationContext} design): the log is the full immutable record, this is the trimmed,
+ * mutable working memory the model sees — kept apart but both persisted in the same DB.</p>
+ *
  * <p>Single session (single-user) for now; a future multi-session variant would key the store.</p>
  */
 @ApplicationScoped
 public class ConversationStore {
 
+    private static final Logger LOG = Logger.getLogger(ConversationStore.class.getName());
+    private static final String KEY = "browser";   // single-user: one persisted conversation row
+
     private final List<Map<String, Object>> turns = new ArrayList<>();
     private volatile String systemPrompt = "You are a helpful assistant.";
+
+    @ConfigProperty(name = "chatui3.iolog.db-path", defaultValue = "chatui3-iolog")
+    String dbPath;
+
+    @Inject
+    ObjectMapper mapper;
+
+    @Inject
+    IoLogStore ioLog;
+
+    /** Own H2 connection (separate from the log store's, AUTO_SERVER), or null if unavailable. */
+    private Connection db;
+
+    // ── Conversation API ──────────────────────────────────────────────────────
 
     /**
      * Builds the messages to send for one turn: {@code system + committed history + current user}.
@@ -54,15 +95,113 @@ public class ConversationStore {
     public synchronized void commitTurn(String user, String assistant) {
         turns.add(message("user", user));
         turns.add(message("assistant", assistant));
+        persist();
     }
 
-    /** Clears the conversation history (memory reset). */
+    /** Clears the conversation history (memory reset) and removes the persisted row. */
     public synchronized void clear() {
         turns.clear();
+        deletePersisted();
     }
 
-    public void setSystemPrompt(String prompt) {
+    public synchronized void setSystemPrompt(String prompt) {
         this.systemPrompt = prompt;
+        persist();
+    }
+
+    // ── Persistence / resume ──────────────────────────────────────────────────
+
+    void onStart(@Observes StartupEvent event) {
+        try {
+            String url = "jdbc:h2:" + Path.of(dbPath).toAbsolutePath() + ";AUTO_SERVER=TRUE";
+            db = DriverManager.getConnection(url);
+            try (Statement st = db.createStatement()) {
+                st.execute("CREATE TABLE IF NOT EXISTS conversation_state ("
+                        + "conv_key VARCHAR(64) PRIMARY KEY, session_id BIGINT, "
+                        + "system_prompt CLOB, turns_json CLOB, updated_at TIMESTAMP)");
+            }
+            load();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Conversation persistence unavailable; staying in-memory", e);
+            db = null;
+        }
+    }
+
+    private synchronized void load() {
+        if (db == null) {
+            return;
+        }
+        try (PreparedStatement ps = db.prepareStatement(
+                "SELECT session_id, system_prompt, turns_json FROM conversation_state WHERE conv_key=?")) {
+            ps.setString(1, KEY);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return;   // no prior conversation to resume
+                }
+                long sid = rs.getLong("session_id");
+                String sp = rs.getString("system_prompt");
+                String tj = rs.getString("turns_json");
+                if (sp != null && !sp.isBlank()) {
+                    systemPrompt = sp;
+                }
+                if (tj != null && !tj.isBlank()) {
+                    List<Map<String, Object>> restored =
+                            mapper.readValue(tj, new TypeReference<List<Map<String, Object>>>() {});
+                    turns.clear();
+                    turns.addAll(restored);
+                }
+                if (sid > 0) {
+                    ioLog.resumeSession(sid);   // keep appending to the same I/O-log session
+                }
+                LOG.info("Resumed conversation: " + (turns.size() / 2) + " turn(s), log session " + sid);
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to load conversation state", e);
+        }
+    }
+
+    /** Upserts the single conversation row. Called within synchronized methods. */
+    private void persist() {
+        if (db == null) {
+            return;
+        }
+        try {
+            String tj = mapper.writeValueAsString(turns);
+            try (PreparedStatement ps = db.prepareStatement(
+                    "MERGE INTO conversation_state (conv_key, session_id, system_prompt, turns_json, updated_at) "
+                            + "VALUES (?,?,?,?,CURRENT_TIMESTAMP)")) {
+                ps.setString(1, KEY);
+                ps.setLong(2, ioLog.currentSessionId());
+                ps.setString(3, systemPrompt);
+                ps.setString(4, tj);
+                ps.executeUpdate();
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to persist conversation state", e);
+        }
+    }
+
+    private void deletePersisted() {
+        if (db == null) {
+            return;
+        }
+        try (PreparedStatement ps = db.prepareStatement("DELETE FROM conversation_state WHERE conv_key=?")) {
+            ps.setString(1, KEY);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to clear persisted conversation", e);
+        }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (db != null) {
+            try {
+                db.close();
+            } catch (Exception e) {
+                // shutting down; ignore
+            }
+        }
     }
 
     private static Map<String, Object> message(String role, String content) {

@@ -1,23 +1,26 @@
 package com.scivicslab.chatui3.rest;
 
+import com.scivicslab.chatui3.actor.ActorNode;
 import com.scivicslab.chatui3.actor.ChatActorSystem;
 import com.scivicslab.chatui3.agent.AgentLoopRunner;
 import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
+import com.scivicslab.chatui3.iolog.IoLogView;
 import com.scivicslab.chatui3.logging.LogTap;
 import com.scivicslab.turingworkflow.plugins.logdb.DistributedLogStore;
-import com.scivicslab.turingworkflow.plugins.logdb.LogEntry;
 import com.scivicslab.turingworkflow.plugins.logdb.SessionSummary;
 import io.smallrye.mutiny.Multi;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
+import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.RestSseElementType;
@@ -45,6 +48,9 @@ public class ChatResource {
 
     @Inject
     IoLogStore ioLog;
+
+    @Inject
+    IoLogView ioLogView;
 
     // ── SSE stream ────────────────────────────────────────────────────────────
 
@@ -170,6 +176,16 @@ public class ChatResource {
         return Response.ok(logTap.recent(500)).build();
     }
 
+    // ── Actors ────────────────────────────────────────────────────────────────
+
+    /** Live actor tree: chatui3 root -> persistent actors, plus the running agent loop (if any). */
+    @GET
+    @Path("/actors")
+    @Produces(MediaType.APPLICATION_JSON)
+    public ActorNode actors() {
+        return system.getActorTree(agentLoopRunner.getActiveAgentTree());
+    }
+
     // ── Complete I/O log (s_iolog): persistent H2 sessions, for the browse/compare view ─────────
 
     /** Lists conversation sessions (most recent first) from the complete I/O log. */
@@ -187,19 +203,52 @@ public class ChatResource {
         return Response.ok(out).build();
     }
 
-    /** Returns the agent's full I/O entries (request+response per step) for one session. */
+    /** Lists the agents (actors) that logged in a session, with line counts (agent-axis index). */
+    @GET
+    @Path("/sessions/{id}/agents")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<IoLogView.AgentInfo> sessionAgents(@PathParam("id") long id) {
+        return ioLogView.agents(id);
+    }
+
+    /**
+     * Returns a shaped, filtered, bounded page of one session's I/O. Filters (any may be omitted):
+     * {@code agent} (node_id), {@code label} (turn/step/llm|tool substring), {@code level}
+     * (DEBUG/INFO/WARN/ERROR threshold), {@code q} (message text), {@code since}/{@code until}
+     * (ISO LocalDateTime), {@code limit}. {@code message} is a preview; full text via the entry endpoint.
+     */
     @GET
     @Path("/sessions/{id}/logs")
     @Produces(MediaType.APPLICATION_JSON)
-    public Response sessionLogs(@PathParam("id") long id) {
-        DistributedLogStore store = ioLog.store();
-        if (store == null) {
-            return Response.ok(List.of()).build();
-        }
-        List<Map<String, Object>> out = store.getLogsByNode(id, "agent").stream()
-                .map(ChatResource::logEntryToMap)
-                .toList();
-        return Response.ok(out).build();
+    public IoLogView.Page sessionLogs(@PathParam("id") long id,
+            @QueryParam("agent") String agent,
+            @QueryParam("label") String label,
+            @QueryParam("level") String level,
+            @QueryParam("q") String q,
+            @QueryParam("since") String since,
+            @QueryParam("until") String until,
+            @QueryParam("limit") @DefaultValue("0") int limit) {
+        return ioLogView.logs(id, new IoLogView.Filter(agent, label, level, q, since, until, limit));
+    }
+
+    /** Returns the full (untruncated) message of one log entry, for on-expand lazy loading. */
+    @GET
+    @Path("/sessions/{id}/entry/{logId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response sessionEntry(@PathParam("id") long id, @PathParam("logId") long logId) {
+        return Response.ok(Map.of("message", ioLogView.fullMessage(id, logId))).build();
+    }
+
+    /**
+     * Returns the reconstructed agent-loop trace for a session: per turn, the ordered flow of LLM
+     * steps (model text + tool calls) and tool executions (name/input + observation digest). This is
+     * the loop's play-by-play, shaped server-side from the complete I/O log.
+     */
+    @GET
+    @Path("/sessions/{id}/trace")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<IoLogView.TraceTurn> sessionTrace(@PathParam("id") long id) {
+        return ioLogView.trace(id);
     }
 
     private Map<String, Object> sessionToMap(SessionSummary s) {
@@ -213,11 +262,4 @@ public class ChatResource {
                 "totalLogEntries", s.getTotalLogEntries());
     }
 
-    private static Map<String, Object> logEntryToMap(LogEntry e) {
-        return Map.of(
-                "time",    String.valueOf(e.getTimestamp()),
-                "label",   String.valueOf(e.getLabel()),
-                "level",   String.valueOf(e.getLevel()),
-                "message", String.valueOf(e.getMessage()));
-    }
 }

@@ -17,8 +17,14 @@ public final class ContextBudget {
 
     private ContextBudget() {}
 
-    /** Chars per token (conservative for mixed Japanese/English; lower = trims earlier). */
-    static final double CHARS_PER_TOKEN = 3.0;
+    /**
+     * Chars per token for the estimate. 2.0 stays conservative even for Japanese (which is denser in
+     * tokens than English ~4 chars/token), so the estimate never under-counts and the request stays
+     * under the model's real limit even at a large context window (lower = trims earlier). English
+     * conversations therefore trim a little earlier than strictly necessary — an acceptable trade for
+     * not overflowing the model on Japanese-heavy context.
+     */
+    static final double CHARS_PER_TOKEN = 2.0;
     /** Per-message overhead (role + formatting) added to each message's content estimate. */
     static final int PER_MESSAGE_OVERHEAD = 4;
 

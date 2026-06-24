@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css">
+    <link rel="stylesheet" href="console.css?v=9">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -84,8 +84,18 @@
         <div id="splitter" title="Drag to resize"></div>
 
         <div id="right-panel">
+            <div id="right-config-bar" title="Live LLM settings — applied immediately via /api/config (reverts to application.properties defaults on restart)">
+                <label>Model <select id="cfg-model"></select></label>
+                <label>Temp <input id="cfg-temp" type="number" min="0" max="2" step="0.1"
+                    title="Sampling temperature. Lower (0–0.2) for code/deterministic, higher for varied prose."></label>
+                <label>Max&nbsp;output <input id="cfg-maxtokens" type="number" min="1" max="131072" step="256"
+                    title="Max tokens for the model's REPLY (output length) — not the context window."></label>
+                <span id="cfg-status"></span>
+            </div>
             <div id="right-tab-bar">
                 <button class="rtab-btn active" data-tab="logs">Logs</button>
+                <button class="rtab-btn" data-tab="actors">Actors</button>
+                <button class="rtab-btn" data-tab="io">I/O</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
@@ -108,12 +118,51 @@
                     </div>
                     <div id="logs-list"></div>
                 </section>
+
+                <section id="tab-actors" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <button id="actors-refresh" type="button">Refresh</button>
+                        <label class="tab-auto"><input type="checkbox" id="actors-auto" checked> Auto</label>
+                        <span id="actors-status"></span>
+                    </div>
+                    <div id="actors-tree"></div>
+                </section>
+
+                <section id="tab-io" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <label class="tab-auto">Session:
+                            <select id="io-session"></select>
+                        </label>
+                        <button id="io-refresh" type="button">Refresh</button>
+                        <button id="io-mode" type="button" title="Toggle between raw entries and the reconstructed agent-loop trace">Trace</button>
+                        <span id="io-status"></span>
+                    </div>
+                    <div id="io-body">
+                        <div id="io-agents" title="Agents (actors) in this session"></div>
+                        <div id="io-main">
+                            <div class="io-filters">
+                                <input id="io-q" type="text" placeholder="text in message">
+                                <input id="io-label" type="text" placeholder="label (turn3, /llm, /tool)">
+                                <select id="io-level">
+                                    <option value="">level: all</option>
+                                    <option value="DEBUG">DEBUG</option>
+                                    <option value="INFO">INFO</option>
+                                    <option value="WARN">WARN</option>
+                                    <option value="ERROR">ERROR</option>
+                                </select>
+                                <label class="io-lim" title="Max records returned (one LLM call or one tool call = 1 record). Default 200.">max&nbsp;<input id="io-limit" type="number" value="200" min="1" max="1000"></label>
+                                <button id="io-apply" type="button">Apply</button>
+                            </div>
+                            <div id="io-entries"></div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
     </div>
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
-    <script src="app.js?v=45"></script>
-    <script src="console.js"></script>
+    <script src="app.js?v=46"></script>
+    <script src="console.js?v=9"></script>
 </body>
 </html>

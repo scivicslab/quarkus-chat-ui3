@@ -1,5 +1,6 @@
 package com.scivicslab.chatui3.iolog;
 
+import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.plugins.logdb.DistributedLogStore;
 import com.scivicslab.turingworkflow.plugins.logdb.H2LogStore;
 import com.scivicslab.turingworkflow.plugins.logdb.SessionStatus;
@@ -34,23 +35,38 @@ public class IoLogStore {
     @ConfigProperty(name = "chatui3.iolog.db-path", defaultValue = "chatui3-iolog")
     String dbPath;
 
+    // Lossless MVStore compression for the complete-I/O log: the logged content is highly repetitive
+    // (the full request JSON is re-serialized every step), so compression shrinks the .mv.db file
+    // several-fold with no loss. Applies to newly written data.
+    @ConfigProperty(name = "chatui3.iolog.compress", defaultValue = "true")
+    boolean compress;
+
     private DistributedLogStore store;
     private ExecutorService dbExecutor;
     private long sessionId = -1;
     private boolean failed = false;
+
+    /**
+     * The actor wrapping {@link #store}, created by ChatActorSystem as a child of root. When set,
+     * {@link #record} dispatches writes through it (fire-and-forget tell) so every complete-I/O write
+     * funnels through one single-writer actor that is visible in the actor tree (GET /api/actors),
+     * mirroring actor-IaC's "the log store is an actor (3-layer)" pattern.
+     */
+    private volatile ActorRef<DistributedLogStore> logStoreRef;
 
     private synchronized void ensureStore() {
         if (store != null || failed) {
             return;
         }
         try {
-            store = new H2LogStore(Path.of(dbPath));
+            store = new H2LogStore(Path.of(dbPath), compress);
             dbExecutor = Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "iolog-db");
                 t.setDaemon(true);
                 return t;
             });
-            LOG.info("I/O log DB opened: " + Path.of(dbPath).toAbsolutePath() + ".mv.db");
+            LOG.info("I/O log DB opened: " + Path.of(dbPath).toAbsolutePath() + ".mv.db"
+                    + " (compress=" + compress + ")");
         } catch (Exception e) {
             failed = true;
             LOG.log(Level.SEVERE, "Failed to open I/O log DB; complete logging disabled", e);
@@ -75,6 +91,23 @@ public class IoLogStore {
         return sessionId;
     }
 
+    /** The current conversation's log session id, or -1 if none. */
+    public synchronized long currentSessionId() {
+        return sessionId;
+    }
+
+    /**
+     * Resumes an existing conversation log session (e.g. after a restart, from persisted state) so
+     * the conversation keeps appending to the same session instead of starting a new one.
+     */
+    public synchronized void resumeSession(long sid) {
+        ensureStore();
+        if (store != null && sid >= 0) {
+            sessionId = sid;
+            LOG.info("Resumed conversation log session: " + sid);
+        }
+    }
+
     /** Ends the current conversation session (called on memory reset). */
     public synchronized void resetSession() {
         if (store != null && sessionId >= 0) {
@@ -93,6 +126,21 @@ public class IoLogStore {
         return store;
     }
 
+    /**
+     * Attaches the actor (a child of the chatui3 root) that wraps {@link #store}. After this,
+     * {@link #record} writes via the actor instead of calling the store directly, so all writes
+     * funnel through one single-writer actor that shows up in the actor tree.
+     */
+    public void attachActor(ActorRef<DistributedLogStore> ref) {
+        this.logStoreRef = ref;
+    }
+
+    /** The single-writer logStore actor (child of root), or null if logging is disabled/not attached.
+     *  Used to wire a {@code DatabaseAccumulator} into the agent-loop's outputMultiplexer. */
+    public ActorRef<DistributedLogStore> logStoreActor() {
+        return logStoreRef;
+    }
+
     /** The single-threaded executor used to dispatch async DB writes. May be null if disabled. */
     public synchronized ExecutorService dbExecutor() {
         ensureStore();
@@ -108,6 +156,14 @@ public class IoLogStore {
         if (sessionId < 0) {
             return;
         }
+        ActorRef<DistributedLogStore> ref = logStoreRef;
+        if (ref != null) {
+            // Fire-and-forget through the single-writer logStore actor (actor-IaC pattern). The
+            // store's own writer thread still batches the actual H2 write, so this returns at once.
+            ref.tell(s -> s.logAction(sessionId, node, label, "output", 0, 0L, content));
+            return;
+        }
+        // Fallback before the actor is attached (or if logging failed to open): write directly.
         DistributedLogStore s = store();
         if (s == null) {
             return;
@@ -151,7 +207,9 @@ public class IoLogStore {
 
     @PreDestroy
     void shutdown() {
-        resetSession();
+        // Do NOT end the conversation session here: leaving it open (and persisting it, see
+        // ConversationStore) lets the conversation resume across a restart. Only an explicit
+        // "New conversation" (resetSession via DELETE /api/history) ends it.
         if (store != null) {
             try {
                 store.close();

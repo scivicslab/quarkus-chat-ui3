@@ -98,10 +98,6 @@ public class VllmClient {
         streamCompletion(messages, config, stop, null, onDelta, onComplete);
     }
 
-    /**
-     * Worker overload with an optional I/O-log context. The full request + response is recorded once
-     * here, so every caller (browser agent loop and entry A) logs uniformly at this single point.
-     */
     public void streamCompletion(
             List<Map<String, Object>> messages,
             ChatUiConfig config,
@@ -109,9 +105,27 @@ public class VllmClient {
             LogContext logCtx,
             Consumer<String> onDelta,
             Consumer<VllmResponse> onComplete) {
+        streamCompletion(messages, config, stop, null, logCtx, onDelta, onComplete);
+    }
+
+    /**
+     * Worker overload with optional native {@code tools} and an I/O-log context. The full request +
+     * response is recorded once here, so every caller (browser agent loop and entry A) logs uniformly
+     * at this single point. When {@code tools} is non-null the model may answer with native
+     * {@code tool_calls} (function calling) instead of text; those are parsed into the
+     * {@link VllmResponse}.
+     */
+    public void streamCompletion(
+            List<Map<String, Object>> messages,
+            ChatUiConfig config,
+            List<String> stop,
+            List<Map<String, Object>> tools,
+            LogContext logCtx,
+            Consumer<String> onDelta,
+            Consumer<VllmResponse> onComplete) {
 
         String url = config.getVllmBaseUrl() + "/v1/chat/completions";
-        String requestBody = buildRequestBody(messages, config, stop);
+        String requestBody = buildRequestBody(messages, config, stop, tools);
 
         // Compact request log: the full history can be large and is sent every turn, so by default
         // log only the shape (count, system+history present, current user, size). The full JSON is
@@ -133,8 +147,12 @@ public class VllmClient {
                 .build();
 
         StringBuilder fullText      = new StringBuilder();
+        StringBuilder reasoning     = new StringBuilder();  // model chain-of-thought (reasoning_content)
         int[]         tokenCounts   = {0, 0};  // [promptTokens, completionTokens]
         String[]      lastChunkJson = {""};
+        // Native tool_calls arrive across many SSE chunks (id+name in the first, arguments streamed as
+        // fragments); accumulate them by their choices[].delta.tool_calls[].index.
+        java.util.Map<Integer, ToolCallBuilder> toolCalls = new java.util.TreeMap<>();
 
         // Tee text fragments to the batch logger (which logs the response in ~3s windows as JSON)
         // alongside the caller's onDelta.
@@ -160,7 +178,7 @@ public class VllmClient {
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    parseSseLine(line, onDeltaTee, fullText, tokenCounts, lastChunkJson);
+                    parseSseLine(line, onDeltaTee, fullText, reasoning, tokenCounts, lastChunkJson, toolCalls);
                 }
             }
         } catch (RuntimeException e) {
@@ -183,19 +201,41 @@ public class VllmClient {
             LOG.info("vLLM response usage chunk: " + lastChunkJson[0]);
         }
 
+        List<VllmResponse.ToolCall> finalToolCalls = new ArrayList<>();
+        for (ToolCallBuilder b : toolCalls.values()) {
+            if (b.name != null && !b.name.isBlank()) {
+                finalToolCalls.add(new VllmResponse.ToolCall(
+                        b.id, b.name, b.arguments.toString()));
+            }
+        }
+
         VllmResponse response = new VllmResponse(
                 fullText.toString(),
                 tokenCounts[0],
                 tokenCounts[1],
                 lastChunkJson[0],
-                requestBody);
+                requestBody,
+                finalToolCalls);
 
         // Single shared logging point: record the real prompt + response for THIS vLLM call. Both the
         // browser agent loop and entry A pass through here, so every call is captured uniformly.
         if (ioLog != null && logCtx != null) {
+            StringBuilder toolPart = new StringBuilder();
+            if (response.hasToolCalls()) {
+                toolPart.append("\n\nTOOL_CALLS:");
+                for (VllmResponse.ToolCall tc : response.toolCalls()) {
+                    toolPart.append("\n  ").append(tc.name()).append(' ').append(tc.arguments());
+                }
+            }
+            // The model's chain-of-thought (reasoning_content) is shown live in the browser but is not
+            // part of fullText (the answer). Persist it here so the complete trace lives in H2 and the
+            // browser's thinking view can be trimmed without losing it.
+            String reasoningPart = reasoning.length() > 0 ? "\n\nREASONING:\n" + reasoning : "";
             ioLog.record(logCtx.sessionId(), logCtx.node(), logCtx.label(),
                     "REQUEST:\n" + requestBody
                     + "\n\nRESPONSE:\n" + response.fullText()
+                    + reasoningPart
+                    + toolPart
                     + "\n\nUSAGE: promptTokens=" + response.promptTokens()
                     + " completionTokens=" + response.completionTokens());
         }
@@ -244,7 +284,7 @@ public class VllmClient {
     // ── private ───────────────────────────────────────────────────────────────
 
     private String buildRequestBody(List<Map<String, Object>> messages, ChatUiConfig config,
-            List<String> stop) {
+            List<String> stop, List<Map<String, Object>> tools) {
         Map<String, Object> req = new LinkedHashMap<>();
         if (!config.getModelId().isBlank()) {
             req.put("model", config.getModelId());
@@ -257,6 +297,11 @@ public class VllmClient {
         if (stop != null && !stop.isEmpty()) {
             req.put("stop", stop);   // halt generation at these sequences (ReAct tool boundary)
         }
+        if (tools != null && !tools.isEmpty()) {
+            // Native function calling: let the model decide whether to call a tool or answer.
+            req.put("tools", tools);
+            req.put("tool_choice", "auto");
+        }
         try {
             return mapper.writeValueAsString(req);
         } catch (Exception e) {
@@ -264,12 +309,21 @@ public class VllmClient {
         }
     }
 
+    /** Accumulates one streamed native tool call across SSE chunks (id/name first, arguments piecewise). */
+    private static final class ToolCallBuilder {
+        String id;
+        String name;
+        final StringBuilder arguments = new StringBuilder();
+    }
+
     private void parseSseLine(
             String line,
             Consumer<String> onDelta,
             StringBuilder fullText,
+            StringBuilder reasoningBuf,
             int[] tokenCounts,
-            String[] lastChunkJson) {
+            String[] lastChunkJson,
+            Map<Integer, ToolCallBuilder> toolCalls) {
 
         if (!line.startsWith("data: ")) return;
         String data = line.substring(6).trim();
@@ -281,12 +335,36 @@ public class VllmClient {
             // Extract text delta from choices[0].delta.content
             JsonNode choices = node.path("choices");
             if (choices.isArray() && !choices.isEmpty()) {
-                JsonNode content = choices.get(0).path("delta").path("content");
+                JsonNode delta = choices.get(0).path("delta");
+                JsonNode content = delta.path("content");
                 if (!content.isMissingNode() && !content.isNull()) {
                     String fragment = content.asText();
                     if (!fragment.isEmpty()) {
                         fullText.append(fragment);
                         onDelta.accept(fragment);
+                    }
+                }
+                // With --reasoning-parser, the model's chain-of-thought arrives separately as
+                // reasoning_content (not content). Stream it to the live "thinking" view but do NOT
+                // append it to fullText, so the committed answer stays the content only.
+                JsonNode reasoning = delta.path("reasoning_content");
+                if (!reasoning.isMissingNode() && !reasoning.isNull()) {
+                    String rf = reasoning.asText();
+                    if (!rf.isEmpty()) {
+                        reasoningBuf.append(rf);   // captured for the full I/O log (REASONING section)
+                        onDelta.accept(rf);
+                    }
+                }
+                // Native tool_calls deltas: each carries an index; id+name come once, arguments stream.
+                JsonNode tcs = delta.path("tool_calls");
+                if (tcs.isArray()) {
+                    for (JsonNode tc : tcs) {
+                        int idx = tc.path("index").asInt(0);
+                        ToolCallBuilder b = toolCalls.computeIfAbsent(idx, k -> new ToolCallBuilder());
+                        if (tc.hasNonNull("id")) b.id = tc.get("id").asText();
+                        JsonNode fn = tc.path("function");
+                        if (fn.hasNonNull("name")) b.name = fn.get("name").asText();
+                        if (fn.hasNonNull("arguments")) b.arguments.append(fn.get("arguments").asText());
                     }
                 }
             }

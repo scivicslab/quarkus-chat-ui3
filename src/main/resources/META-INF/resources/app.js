@@ -717,14 +717,33 @@
         processQueue();
     }
 
-    // Release the per-turn thinking block (kept in the DOM, collapsible) so the next turn starts fresh.
+    // Retention reduction: a finished turn's thinking block is a LIVE display buffer only (the I/O tab
+    // holds the LLM REQUEST/RESPONSE and full tool observations in H2). To stop the left pane from
+    // accumulating large thinking text across turns, once a turn ends we keep only a bounded head+tail
+    // of its block in the DOM and collapse it (the live, in-progress turn keeps its full text).
+    var THINKING_TRIM_THRESHOLD = 6000; // only trim a finished block longer than this
+    var THINKING_KEEP_HEAD = 3500;
+    var THINKING_KEEP_TAIL = 1500;
+
+    // Release the per-turn thinking block (kept in the DOM, collapsed + trimmed) so the next turn
+    // starts fresh and the finished block no longer holds its whole trace in memory.
     function finalizeThinkingBlock() {
-        if (currentThinkingBlock) {
-            var s = currentThinkingBlock.querySelector('summary');
-            if (s) s.textContent = 'Thinking';
-            currentThinkingBlock = null;
-            currentThinkingText = '';
+        if (!currentThinkingBlock) return;
+        var s = currentThinkingBlock.querySelector('summary');
+        if (s) s.textContent = 'Thinking';
+        var body = currentThinkingBlock.querySelector('.thinking-body');
+        if (body) {
+            var t = body.textContent || '';
+            if (t.length > THINKING_TRIM_THRESHOLD) {
+                var omitted = t.length - THINKING_KEEP_HEAD - THINKING_KEEP_TAIL;
+                body.textContent = t.slice(0, THINKING_KEEP_HEAD)
+                    + '\n\n… [' + omitted + ' chars trimmed from this live thinking view] …\n\n'
+                    + t.slice(-THINKING_KEEP_TAIL);
+            }
         }
+        currentThinkingBlock.open = false; // collapse: a finished trace shouldn't dominate the view
+        currentThinkingBlock = null;
+        currentThinkingText = '';
     }
 
     function handlePrompt(event) {

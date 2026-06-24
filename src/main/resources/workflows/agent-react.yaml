@@ -1,9 +1,9 @@
 name: agent-react
 description: |
-  In-process ReAct agent loop (entry B). think -> act -> observe, repeated until the model
-  produces a Final Answer (or the step limit / cancel ends it). Branching is by action success:
-  stepExpectingAction succeeds only when the model asked for a tool; otherwise it fails and the
-  engine falls through to finish.
+  In-process agent loop (entry B) using the model's NATIVE function calling. think -> act -> observe,
+  repeated until the model answers in plain text instead of calling a tool (or the step limit / cancel
+  ends it). Branching is by action success: stepExpectingAction succeeds only when the model returned
+  tool_calls; otherwise (a text answer) it fails and the engine falls through to finish.
 
 steps:
   - states: ["0", "think"]
@@ -15,21 +15,21 @@ steps:
 
   - states: ["think", "act"]
     label: think-action
-    note: "one LLM step; succeeds if the model asked for a tool"
+    note: "one LLM step; succeeds if the model returned native tool_calls"
     actions:
       - actor: agent
         method: stepExpectingAction
 
   - states: ["think", "end"]
     label: think-final
-    note: "step failed = final answer / step limit / cancelled -> finish"
+    note: "step failed = text answer / step limit / cancelled -> finish"
     actions:
       - actor: agent
         method: finish
 
   - states: ["act", "think"]
     label: run-tool
-    note: "execute the tool, append the observation, loop back to think"
+    note: "execute the tool calls, append the observations, loop back to think"
     actions:
       - actor: agent
         method: runTool
