@@ -1,0 +1,123 @@
+name: understand-project
+description: |
+  Understand a source-code project and generate an overview document from the code itself.
+  Map-reduce over the codebase, so large projects that do not fit one prompt are handled:
+    scanProject (deterministic)         -> list:files   (one "FILE: path\n\n<content>" per file)
+    parallel-map(summarize-file)        -> list:summaries (one concise summary per file, in parallel)
+    joinListToStr                       -> str:joined   (all summaries in one string)
+    llm synthesize                      -> ${result}    (a cohesive overview, reduce step)
+    writeStrToFile                      -> ${out}
+  Usage:
+    java -jar turing-workflow.jar run -w understand-project.yaml -d ~/works/workflow \
+      -P dir=/abs/project -P out=/abs/OVERVIEW.md
+  Note: the reduce step feeds all per-file summaries to a single LLM call. For very large
+  projects whose joined summaries exceed the context window, the reduce must become hierarchical
+  (summarize groups of summaries first); this version does single-shot reduce.
+
+params:
+  dir:
+    description: "Project root to analyze (absolute path)"
+  out:
+    description: "Output overview document (absolute path)"
+  wf.dir:
+    description: "Directory holding the sub-workflow (summarize-file.yaml)"
+    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+
+steps:
+  - states: ["0", "1"]
+    label: load-codedoc
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-codedoc:1.0.0"
+
+  - states: ["1", "2"]
+    label: create-codedoc
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "codedoc", "com.scivicslab.turingworkflow.plugins.codedoc.CodeDocActor"]
+
+  - states: ["2", "3"]
+    label: scan
+    note: "enumerate source files (project-type aware; skips build/VCS/binary noise) -> list:files"
+    actions:
+      - actor: codedoc
+        method: scanProject
+        arguments: ["${dir}", "list:files", 20000]
+
+  - states: ["3", "4"]
+    label: summarize-parallel
+    note: "summarize every file in parallel -> list:summaries (the map step)"
+    actions:
+      - actor: parallel-map
+        method: run
+        arguments: ["${wf.dir}/summarize-file.yaml", "list:files", "list:summaries", 6]
+
+  - states: ["4", "5"]
+    label: join-summaries
+    note: "concatenate all per-file summaries into one string for the reduce step"
+    actions:
+      - actor: codedoc
+        method: joinListToStr
+        arguments: ["list:summaries", "str:joined"]
+
+  - states: ["5", "6"]
+    label: load-llm
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-llm:1.5.0"
+
+  - states: ["6", "7"]
+    label: create-llm
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "llm", "com.scivicslab.turingworkflow.plugins.llm.LlmActor"]
+
+  - states: ["7", "8"]
+    label: configure-llm
+    actions:
+      - actor: llm
+        method: setOpenAiUrl
+        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+      - actor: llm
+        method: setSystemPrompt
+        arguments: "You are a senior software engineer and technical writer. You are given per-file summaries of ONE software project (each begins with the file path in backticks). Synthesize them into a single cohesive project overview document in Markdown, in English. Cover: (1) what the program does (purpose), (2) the architecture — the major components/layers and how they fit together, (3) how to build and run it if that is evident from the files, (4) notable design points or extension mechanisms. Do not merely concatenate the summaries; integrate them and resolve overlaps. Use Markdown headings. Output only the document."
+
+  - states: ["8", "9"]
+    label: synthesize
+    note: "reduce: one LLM call over all summaries -> ${result}"
+    actions:
+      - actor: llm
+        method: callOpenAi
+        arguments: "$(str:joined.get)"
+
+  - states: ["9", "10"]
+    label: capture-overview
+    actions:
+      - actor: str:overview
+        method: set
+        arguments: "${result}"
+
+  - states: ["10", "11"]
+    label: write
+    actions:
+      - actor: codedoc
+        method: writeStrToFile
+        arguments: ["${out}", "str:overview"]
+
+  - states: ["11", "end"]
+    label: done
+    actions:
+      - actor: out
+        method: error
+        arguments: "understand-project: wrote ${out}"
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "understand-project: unexpected state"

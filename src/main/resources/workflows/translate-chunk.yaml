@@ -1,0 +1,51 @@
+name: translate-chunk
+description: |
+  Sub-workflow run once per chunk by parallel-map. Faithfully translates str:input into Japanese
+  and writes the result to str:output. Self-contained: loads plugin-llm itself.
+
+steps:
+  - states: ["0", "1"]
+    label: load-llm
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-llm:1.5.0"
+
+  - states: ["1", "2"]
+    label: create-llm
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "llm", "com.scivicslab.turingworkflow.plugins.llm.LlmActor"]
+
+  - states: ["2", "3"]
+    label: configure-llm
+    actions:
+      - actor: llm
+        method: setOpenAiUrl
+        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+      - actor: llm
+        method: setSystemPrompt
+        arguments: "You are a professional technical translator. Translate the user's text into Japanese FAITHFULLY and COMPLETELY: do not summarize, omit, condense, or add anything. Preserve the Markdown structure exactly (headings, lists, tables, blank lines). Do NOT translate code, fenced code blocks, text inside backticks, identifiers, or URLs — keep them verbatim. Output ONLY the translated text, with no preamble and no surrounding code fence."
+
+  - states: ["3", "4"]
+    label: translate
+    actions:
+      - actor: llm
+        method: callOpenAi
+        arguments: "$(str:input.get)"
+
+  - states: ["4", "end"]
+    label: store-output
+    note: "${result} holds the translation from the previous action"
+    actions:
+      - actor: str:output
+        method: set
+        arguments: "${result}"
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "translate-chunk: unexpected state"

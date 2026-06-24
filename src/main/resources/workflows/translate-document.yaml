@@ -1,0 +1,69 @@
+name: translate-document
+description: |
+  Faithfully translate a (possibly long) document into Japanese, in parallel.
+  chunk (deterministic) -> parallel-map(translate-chunk per chunk) -> join + write.
+  Usage:
+    java -jar turing-workflow-3.7.0.jar run -w translate-document.yaml -d ~/works/workflow \
+      -P in=/abs/in.md -P out=/abs/out.ja.md -m 2000
+
+params:
+  in:
+    description: "Input document file (absolute path)"
+  out:
+    description: "Output file for the translation (absolute path)"
+  wf.dir:
+    description: "Directory holding the sub-workflow (translate-chunk.yaml)"
+    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+
+steps:
+  - states: ["0", "1"]
+    label: load-codedoc
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-codedoc:1.0.0"
+
+  - states: ["1", "2"]
+    label: create-codedoc
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "codedoc", "com.scivicslab.turingworkflow.plugins.codedoc.CodeDocActor"]
+
+  - states: ["2", "3"]
+    label: chunk
+    note: "split the document into Markdown-aware chunks -> list:chunks"
+    actions:
+      - actor: codedoc
+        method: chunkFile
+        arguments: ["${in}", "list:chunks", 3000]
+
+  - states: ["3", "4"]
+    label: translate-parallel
+    note: "run translate-chunk over every chunk in parallel -> list:translated"
+    actions:
+      - actor: parallel-map
+        method: run
+        arguments: ["${wf.dir}/translate-chunk.yaml", "list:chunks", "list:translated", 6]
+
+  - states: ["4", "5"]
+    label: write
+    note: "join the translated chunks and write the output file"
+    actions:
+      - actor: codedoc
+        method: writeFileFromList
+        arguments: ["${out}", "list:translated"]
+
+  - states: ["5", "end"]
+    label: done
+    actions:
+      - actor: out
+        method: error
+        arguments: "translate-document: wrote ${out}"
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "translate-document: unexpected state"

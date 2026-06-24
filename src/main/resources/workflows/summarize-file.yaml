@@ -1,0 +1,53 @@
+name: summarize-file
+description: |
+  Sub-workflow run once per source file by parallel-map (from understand-project.yaml).
+  str:input holds one "FILE: <path>\n\n<content>" payload produced by codedoc.scanProject.
+  Produces a concise per-file summary into str:output. Self-contained: loads plugin-llm itself
+  because parallel-map runs each task in an isolated IIActorSystem.
+
+steps:
+  - states: ["0", "1"]
+    label: load-llm
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-llm:1.5.0"
+
+  - states: ["1", "2"]
+    label: create-llm
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "llm", "com.scivicslab.turingworkflow.plugins.llm.LlmActor"]
+
+  - states: ["2", "3"]
+    label: configure-llm
+    actions:
+      - actor: llm
+        method: setOpenAiUrl
+        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+      - actor: llm
+        method: setSystemPrompt
+        arguments: "You are a senior code analyst. You receive ONE source file, prefixed with its path on the first line (FILE: <path>). Write a concise summary in English (3-6 sentences). State: (1) the file's single responsibility, (2) its key classes/methods/types and what they do, (3) notable dependencies or how it connects to the rest of the project. Begin the summary with the file path in backticks. Do not quote the code back; describe it. Output only the summary."
+
+  - states: ["3", "4"]
+    label: summarize
+    actions:
+      - actor: llm
+        method: callOpenAi
+        arguments: "$(str:input.get)"
+
+  - states: ["4", "end"]
+    label: store-output
+    note: "${result} holds the per-file summary from the previous action"
+    actions:
+      - actor: str:output
+        method: set
+        arguments: "${result}"
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "summarize-file: unexpected state"
