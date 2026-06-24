@@ -45,9 +45,12 @@ public class AgentActor extends IIActorRef<Object> {
     private static final int OUTPUT_MARGIN = 256;
 
     private static final String SYSTEM_PROMPT =
-            "You are a helpful assistant. You can call the provided tools to read project files and\n"
-          + "to evaluate arithmetic. Prefer calling a tool over guessing: use 'read' to fetch the\n"
-          + "actual contents of files or directories the user refers to, and 'calc' for any arithmetic.\n"
+            "You are a helpful assistant. You can call the provided tools instead of guessing: 'read'\n"
+          + "to fetch the actual contents of files/directories the user refers to, 'calc' for any\n"
+          + "arithmetic, 'web_search' for current events or external facts not in the working directory,\n"
+          + "'search_docs' to look up the team's own internal documentation by meaning (use it first for\n"
+          + "questions about this team's projects/systems/conventions), and 'write' to save text to a\n"
+          + "file when the user asks to save/export something.\n"
           + "\n"
           + "You act ONLY within this single reply. You cannot do work after you answer, you cannot run\n"
           + "anything in the background, and you cannot 'report back later'. There is no later turn that\n"
@@ -62,10 +65,19 @@ public class AgentActor extends IIActorRef<Object> {
           + "  turn. If you have nothing left to read, just answer.\n"
           + "- Every tool call requires a 'reason' argument: state, in one concise sentence, why THIS\n"
           + "  call is needed now (what you are trying to find or verify). Make it specific, not boilerplate.\n"
-          + "- 'read' reads DIRECTORIES too (recursively). To inspect or summarize a project/folder, call\n"
-          + "  read on the directory path itself — do NOT claim you cannot access it and do NOT ask the\n"
-          + "  user for individual file paths. Paths like ~/works/X, $HOME/works/X or an absolute path\n"
-          + "  all resolve into the working directory; pass them to read as given.";
+          + "- 'read' reads DIRECTORIES too (recursively). To inspect a small folder or a specific file,\n"
+          + "  call read on the path itself — do NOT claim you cannot access it and do NOT ask the user\n"
+          + "  for individual file paths. Paths like ~/works/X, $HOME/works/X or an absolute path all\n"
+          + "  resolve into the working directory; pass them as given.\n"
+          + "- For two KNOWN, well-defined jobs, prefer 'run_known_task' over 'read', because it runs a\n"
+          + "  reliable workflow that handles even large inputs that do not fit in one read:\n"
+          + "    * Understanding/summarizing/documenting a WHOLE code project or repository\n"
+          + "      -> run_known_task(task='understand_project', path=<project directory>). It scans the\n"
+          + "      project, summarizes every file in parallel, and synthesizes one overview. Use this\n"
+          + "      instead of read when the user points at a whole project/folder to understand.\n"
+          + "    * Faithfully translating an entire document into Japanese\n"
+          + "      -> run_known_task(task='translate_document', path=<document file>).\n"
+          + "  The task result comes back as the observation; then present it as your final answer.";
 
     private final VllmClient vllmClient;
     private final ChatUiConfig config;
@@ -87,6 +99,10 @@ public class AgentActor extends IIActorRef<Object> {
     // committed turn so the chat view can show prompts entered by non-UI clients.
     private final String source;
 
+    // Dispatches known well-defined tasks (understand a project / translate a document) to a
+    // deterministic Turing Workflow. Backs the 'run_known_task' tool.
+    private final WorkflowDispatcher dispatcher;
+
     // per-turn working memory
     private String question;
     private int turnNo;   // conversation turn number, for labelling I/O log entries
@@ -102,7 +118,8 @@ public class AgentActor extends IIActorRef<Object> {
 
     public AgentActor(String name, VllmClient vllmClient, ChatUiConfig config,
             ActorRef<SseActor> sseRef, ConversationStore conversation, IIActorSystem system,
-            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source) {
+            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source,
+            WorkflowDispatcher dispatcher) {
         super(name, new Object(), system);
         this.vllmClient    = vllmClient;
         this.config        = config;
@@ -113,6 +130,7 @@ public class AgentActor extends IIActorRef<Object> {
         this.contextWindow = contextWindow;
         this.mapper        = mapper;
         this.source        = source;
+        this.dispatcher    = dispatcher;
     }
 
     /** Initialises the turn from the user's message. */
@@ -199,7 +217,7 @@ public class AgentActor extends IIActorRef<Object> {
             String toolInput = extractInput(tc.name(), tc.arguments());
             String observation;
             try {
-                observation = runToolImpl(tc.name(), toolInput);
+                observation = runToolImpl(tc.name(), toolInput, tc.arguments());
             } catch (Exception e) {
                 observation = "error: " + e.getMessage();
             }
@@ -270,7 +288,97 @@ public class AgentActor extends IIActorRef<Object> {
                  "Evaluate a Java arithmetic expression and return its value. Always use this for "
                + "arithmetic instead of computing it yourself.",
                  "expression",
-                 "A Java expression, e.g. 23*47 or Math.sqrt(16) or (1000.0/3)"));
+                 "A Java expression, e.g. 23*47 or Math.sqrt(16) or (1000.0/3)"),
+            tool("web_search",
+                 "Search the web (DuckDuckGo) and return titles, URLs, and snippets. Use this for "
+               + "current events, external facts, or anything not in the working directory. Then read "
+               + "or cite the results.",
+                 "query",
+                 "The search query, e.g. 'Quarkus 3.28 release notes' or 'vLLM tool calling gemma'."),
+            tool("search_docs",
+                 "Search the INTERNAL documentation (the team's own docs) by meaning and return matching "
+               + "document titles, paths, and summaries. Use this first for questions about this team's "
+               + "projects, systems, conventions, or how-tos before searching the web. Then cite the docs.",
+                 "query",
+                 "A natural-language query about the internal docs, e.g. 'how Slurm job scheduling works' "
+               + "or 'POJO-actor の使い方'."),
+            writeTool(),
+            knownTaskTool());
+
+    /**
+     * Builds the schema for {@code write}: save text to a file under the working directory. Two
+     * parameters beyond {@code reason}: {@code path} (where to save) and {@code content} (what to save).
+     */
+    private static Map<String, Object> writeTool() {
+        Map<String, Object> reason = new LinkedHashMap<>();
+        reason.put("type", "string");
+        reason.put("description", "Why you are saving this file now. One concise sentence.");
+        Map<String, Object> path = new LinkedHashMap<>();
+        path.put("type", "string");
+        path.put("description", "Where to save, under the working directory (the user's ~/works). A "
+                + "relative path (e.g. notes/summary.md) or ~/works/..., $HOME/works/... or an absolute "
+                + "/home/.../works/... form. Parent directories are created. An existing directory is rejected.");
+        Map<String, Object> content = new LinkedHashMap<>();
+        content.put("type", "string");
+        content.put("description", "The full text content to write to the file.");
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("reason", reason);
+        props.put("path", path);
+        props.put("content", content);
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", props);
+        params.put("required", List.of("reason", "path", "content"));
+        Map<String, Object> fn = new LinkedHashMap<>();
+        fn.put("name", "write");
+        fn.put("description", "Save text to a file under the working directory. Use when the user asks "
+                + "to save, write, or export content to a file. Confined to the working directory.");
+        fn.put("parameters", params);
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("type", "function");
+        t.put("function", fn);
+        return t;
+    }
+
+    /**
+     * Builds the schema for {@code run_known_task}: the single dispatcher tool that routes a known,
+     * well-defined request to a deterministic Turing Workflow. Two parameters beyond {@code reason}:
+     * {@code task} (an enum selecting the workflow) and {@code path} (the target). Keeping it to one
+     * tool with a {@code task} enum caps the agent loop's tool count no matter how many workflows exist.
+     */
+    private static Map<String, Object> knownTaskTool() {
+        Map<String, Object> reason = new LinkedHashMap<>();
+        reason.put("type", "string");
+        reason.put("description", "Why you are dispatching this task now. One concise sentence.");
+        Map<String, Object> task = new LinkedHashMap<>();
+        task.put("type", "string");
+        task.put("enum", List.of("understand_project", "translate_document"));
+        task.put("description", "understand_project: scan a code project and synthesize an overview "
+                + "document (handles large projects via map-reduce). translate_document: faithfully "
+                + "translate a whole document into Japanese.");
+        Map<String, Object> path = new LinkedHashMap<>();
+        path.put("type", "string");
+        path.put("description", "The target: a project directory for understand_project, or a document "
+                + "file for translate_document. Accepts ~/works/..., $HOME/works/... or an absolute path.");
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("reason", reason);
+        props.put("task", task);
+        props.put("path", path);
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "object");
+        params.put("properties", props);
+        params.put("required", List.of("reason", "task", "path"));
+        Map<String, Object> fn = new LinkedHashMap<>();
+        fn.put("name", "run_known_task");
+        fn.put("description", "Run a reliable workflow for a KNOWN, well-defined job instead of reading "
+                + "files yourself. Use for understanding/documenting a whole code project, or faithfully "
+                + "translating a whole document. Returns the generated document as the observation.");
+        fn.put("parameters", params);
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("type", "function");
+        t.put("function", fn);
+        return t;
+    }
 
     /**
      * Builds one OpenAI tool schema with a required {@code reason} parameter (why this call is being
@@ -327,7 +435,7 @@ public class AgentActor extends IIActorRef<Object> {
         return messages;
     }
 
-    private String runToolImpl(String tool, String input) {
+    private String runToolImpl(String tool, String input, String rawArgs) {
         if ("calc".equals(tool)) {
             if (calc == null) {
                 calc = new JShellCalculator();
@@ -337,6 +445,39 @@ public class AgentActor extends IIActorRef<Object> {
         if ("read".equals(tool)) {
             // Confined to the process working directory and below.
             return FileReadTool.read(java.nio.file.Path.of("").toAbsolutePath(), input);
+        }
+        if ("web_search".equals(tool)) {
+            return WebSearchTool.search(input, WebSearchTool.DEFAULT_MAX_RESULTS);
+        }
+        if ("search_docs".equals(tool)) {
+            return DocSearchTool.search(input, DocSearchTool.DEFAULT_MAX_RESULTS);
+        }
+        if ("write".equals(tool)) {
+            // Needs two fields (path + content); parse the raw tool arguments.
+            String path = "";
+            String content = "";
+            try {
+                JsonNode root = mapper.readTree(rawArgs == null ? "{}" : rawArgs);
+                path = root.path("path").asText("");
+                content = root.path("content").asText("");
+            } catch (Exception e) {
+                return "error: could not parse write arguments: " + e.getMessage();
+            }
+            return FileWriteTool.write(java.nio.file.Path.of("").toAbsolutePath(), path, content);
+        }
+        if ("run_known_task".equals(tool)) {
+            // Dispatch a known job to a Turing Workflow. Needs two fields (task + path), so parse the
+            // raw tool arguments rather than the single extracted input.
+            String task = "";
+            String path = "";
+            try {
+                JsonNode root = mapper.readTree(rawArgs == null ? "{}" : rawArgs);
+                task = root.path("task").asText("");
+                path = root.path("path").asText("");
+            } catch (Exception e) {
+                return "error: could not parse run_known_task arguments: " + e.getMessage();
+            }
+            return dispatcher.run(task, path);
         }
         return "error: unknown tool '" + tool + "'";
     }

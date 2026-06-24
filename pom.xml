@@ -18,7 +18,7 @@
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
     <pojo-actor.version>3.5.0</pojo-actor.version>
-    <turing-workflow.version>3.6.1</turing-workflow.version>
+    <turing-workflow.version>3.7.0</turing-workflow.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
     <!-- uber-jar: {artifactId}-{version}.jar, no -runner suffix -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
@@ -62,11 +62,32 @@
       <version>${turing-workflow.version}</version>
     </dependency>
     <!-- Complete LLM I/O logging (s_iolog): reuse the H2 log store + DatabaseAccumulator.
-         Pinned to turing-workflow 3.6.1 / pojo-actor 3.5.0, matching this project. -->
+         Pinned to turing-workflow / pojo-actor versions matching this project. -->
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-db</artifactId>
       <version>1.6.0</version>
+    </dependency>
+    <!-- Workflow dispatch (known-task automation): the agent loop dispatches well-defined requests
+         (understand a project / translate a document) to map-reduce Turing Workflows. Bundling these
+         plugins puts their actor classes on the app classpath so the workflow's loader.createChild
+         resolves them via Class.forName (robust under Quarkus, no runtime .m2 dependency). -->
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-codedoc</artifactId>
+      <version>1.0.0</version>
+    </dependency>
+    <dependency>
+      <groupId>com.scivicslab.turingworkflow.plugins</groupId>
+      <artifactId>plugin-llm</artifactId>
+      <version>1.5.0</version>
+    </dependency>
+    <!-- web_search tool: DuckDuckGo HTML scraping (same approach as the mcp-gateway / plugin-web tools).
+         Only jsoup is needed; the search logic is a small confined helper, not the shaded plugin jar. -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.18.3</version>
     </dependency>
     <dependency>
       <groupId>io.quarkus</groupId>
