@@ -62,6 +62,7 @@
             if (tab === 'actors') refreshActors();
             if (tab === 'logdb') ioOnShow();
             if (tab === 'syslog') refreshLogs();
+            if (tab === 'workflow') wfOnShow();
         });
     }
 
@@ -686,6 +687,111 @@
         }).catch(function (e) { cfgStatus('error: ' + e.message); });
     }
 
+    // ── Workflow tab (read-only system workflow viewer; Phase 1) ──────────────
+    function wfStatus(msg) {
+        var s = document.getElementById('wf-status');
+        if (s) s.textContent = msg || '';
+    }
+
+    // Splits a workflow YAML into a preamble (everything before the first step) and the top-level
+    // step items (lines beginning with exactly "  - "). Display only — no reassembly in Phase 1.
+    function wfSplitSteps(yaml) {
+        var lines = (yaml || '').split('\n');
+        var preamble = [], steps = [], cur = null;
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (/^  - /.test(line)) {            // a top-level step list item under steps:
+                if (cur) steps.push(cur.join('\n'));
+                cur = [line];
+            } else if (cur) {
+                cur.push(line);
+            } else {
+                preamble.push(line);
+            }
+        }
+        if (cur) steps.push(cur.join('\n'));
+        return { preamble: preamble.join('\n').replace(/\s+$/, ''), steps: steps };
+    }
+
+    function wfStepTitle(text, idx) {
+        var m = text.match(/(^|\n)\s*label:\s*(.+)/);
+        if (m) return m[2].trim();
+        m = text.match(/(^|\n)\s*states:\s*(.+)/);
+        if (m) return 'states: ' + m[2].trim();
+        return 'step ' + (idx + 1);
+    }
+
+    function wfRenderBox(parent, title, body, kind) {
+        var box = document.createElement('div');
+        box.className = 'wf-box' + (kind ? ' wf-' + kind : '');
+        var h = document.createElement('div');
+        h.className = 'wf-box-title';
+        h.textContent = title;
+        var pre = document.createElement('pre');
+        pre.className = 'wf-box-yaml';
+        pre.textContent = body;          // read-only; textContent => no HTML injection
+        box.appendChild(h);
+        box.appendChild(pre);
+        parent.appendChild(box);
+    }
+
+    function wfRender(yaml) {
+        var list = document.getElementById('wf-list');
+        if (!list) return;
+        list.textContent = '';
+        var parts = wfSplitSteps(yaml);
+        if (parts.preamble) wfRenderBox(list, 'workflow header', parts.preamble, 'head');
+        parts.steps.forEach(function (s, i) {
+            wfRenderBox(list, wfStepTitle(s, i), s, 'step');
+        });
+        wfStatus(parts.steps.length + ' step(s) — read-only');
+    }
+
+    function wfLoad(name) {
+        if (!name) return;
+        wfStatus('loading…');
+        fetch('/api/workflows/' + encodeURIComponent(name))
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                if (!d || !d.yaml) { wfStatus('not found'); return; }
+                wfRender(d.yaml);
+            })
+            .catch(function (e) { wfStatus('error: ' + e.message); });
+    }
+
+    function wfPopulate(then) {
+        var sel = document.getElementById('wf-select');
+        if (!sel) return;
+        fetch('/api/workflows').then(function (r) { return r.json(); })
+            .then(function (arr) {
+                sel.textContent = '';
+                (arr || []).forEach(function (w) {
+                    var o = document.createElement('option');
+                    o.value = w.name;
+                    o.textContent = w.title || w.name;
+                    sel.appendChild(o);
+                });
+                if (then) then();
+            })
+            .catch(function (e) { wfStatus('error: ' + e.message); });
+    }
+
+    function wfOnShow() {
+        var sel = document.getElementById('wf-select');
+        if (sel && sel.options.length === 0) {
+            wfPopulate(function () { wfLoad(sel.value); });
+        } else if (sel) {
+            wfLoad(sel.value);
+        }
+    }
+
+    function initWorkflow() {
+        var sel = document.getElementById('wf-select');
+        if (sel) sel.addEventListener('change', function () { wfLoad(sel.value); });
+        var btn = document.getElementById('wf-refresh');
+        if (btn) btn.addEventListener('click', function () { wfLoad(sel ? sel.value : ''); });
+    }
+
     function initConfig() {
         cfgLoad();
         var t = document.getElementById('cfg-temp');
@@ -704,6 +810,7 @@
         initIo();
         initTrace();
         initConfig();
+        initWorkflow();
         traceOnShow();   // Trace is the default active tab; load it on startup.
     });
 })();

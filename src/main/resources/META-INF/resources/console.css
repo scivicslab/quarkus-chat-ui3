@@ -366,3 +366,33 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 #app-header #connection-status { font-size: 12px; }
 #app-header input[type=number] { background: var(--bg-primary, #2a2a2a); color: var(--text-primary, #e6e6e6); border: 1px solid var(--border-color, #444); border-radius: 4px; padding: 3px 6px; font-size: 12px; width: 64px; }
 #app-header #cfg-status { color: var(--accent-blue, #a5b4fc); font-size: 12px; }
+
+/* ── Workflow tab (read-only system workflow viewer; Phase 1) ──────────────── */
+#wf-list { padding: 8px; overflow: auto; }
+#wf-status { color: var(--text-secondary, #8a8a8a); margin-left: auto; }
+.wf-box {
+    border: 1px solid var(--border-color, #2f2f2f);
+    border-radius: 6px;
+    margin: 0 0 8px 0;
+    background: var(--bg-secondary, #232323);
+    overflow: hidden;
+}
+.wf-box.wf-head { border-style: dashed; opacity: 0.95; }
+.wf-box-title {
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent-blue, #a5b4fc);
+    background: var(--bg-tertiary, #1b1b1b);
+    border-bottom: 1px solid var(--border-color, #2f2f2f);
+}
+.wf-box-yaml {
+    margin: 0;
+    padding: 8px 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--text-primary, #e6e6e6);
+}

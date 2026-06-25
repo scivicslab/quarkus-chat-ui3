@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css?v=19">
+    <link rel="stylesheet" href="console.css?v=20">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -101,6 +101,7 @@
                 <button class="rtab-btn" data-tab="actors">Actors</button>
                 <button class="rtab-btn" data-tab="logdb">Log DB</button>
                 <button class="rtab-btn" data-tab="syslog">System Log</button>
+                <button class="rtab-btn" data-tab="workflow">Workflow</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
@@ -172,12 +173,23 @@
                     </div>
                     <div id="logs-list"></div>
                 </section>
+
+                <section id="tab-workflow" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <label class="tab-auto">Workflow:
+                            <select id="wf-select"></select>
+                        </label>
+                        <button id="wf-refresh" type="button">Refresh</button>
+                        <span id="wf-status"></span>
+                    </div>
+                    <div id="wf-list"></div>
+                </section>
             </div>
         </div>
     </div>
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
     <script src="app.js?v=47"></script>
-    <script src="console.js?v=16"></script>
+    <script src="console.js?v=17"></script>
 </body>
 </html>

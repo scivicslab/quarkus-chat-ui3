@@ -3,6 +3,7 @@ package com.scivicslab.chatui3.rest;
 import com.scivicslab.chatui3.actor.ActorNode;
 import com.scivicslab.chatui3.actor.ChatActorSystem;
 import com.scivicslab.chatui3.agent.AgentLoopRunner;
+import com.scivicslab.chatui3.agent.WorkflowCatalog;
 import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
@@ -51,6 +52,9 @@ public class ChatResource {
 
     @Inject
     IoLogView ioLogView;
+
+    @Inject
+    WorkflowCatalog workflowCatalog;
 
     // ── SSE stream ────────────────────────────────────────────────────────────
 
@@ -191,6 +195,29 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public Response logs() {
         return Response.ok(logTap.recent(500)).build();
+    }
+
+    // ── Workflows (right-pane Workflow tab): read-only system workflow YAML ──────
+
+    /** Lists the system workflows the editor can display. */
+    @GET
+    @Path("/workflows")
+    @Produces(MediaType.APPLICATION_JSON)
+    public List<WorkflowCatalog.WorkflowInfo> workflows() {
+        return workflowCatalog.list();
+    }
+
+    /** Returns one system workflow's read-only YAML. */
+    @GET
+    @Path("/workflows/{name}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response workflowYaml(@PathParam("name") String name) {
+        String yaml = workflowCatalog.systemYaml(name);
+        if (yaml == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "unknown workflow: " + name)).build();
+        }
+        return Response.ok(Map.of("name", name, "yaml", yaml, "editable", false)).build();
     }
 
     // ── Actors ────────────────────────────────────────────────────────────────
