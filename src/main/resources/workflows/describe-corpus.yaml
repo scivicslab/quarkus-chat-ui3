@@ -1,0 +1,60 @@
+name: describe-corpus
+description: |
+  Author a frontmatter `description` (<=5 lines) for every Markdown file under a directory that lacks
+  one, so html-saurus can show a real summary in search results (and later embed it for RAG).
+  Sequential by design: the free vLLM node serves one query at a time, so parallelising gives no
+  speed-up. Idempotent: files that already have a description are left untouched.
+  Usage:
+    java -jar turing-workflow.jar run -w describe-corpus.yaml -d <wf.dir> -P dir=/abs/docs/dir -m 100000
+
+params:
+  dir:
+    description: "Directory of Markdown docs to describe (absolute path)"
+  wf.dir:
+    description: "Directory holding the sub-workflow (describe-doc.yaml)"
+    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+
+steps:
+  - states: ["0", "1"]
+    label: load-codedoc
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-codedoc:1.0.0"
+
+  - states: ["1", "2"]
+    label: create-codedoc
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "codedoc", "com.scivicslab.turingworkflow.plugins.codedoc.CodeDocActor"]
+
+  - states: ["2", "3"]
+    label: list-files
+    note: "enumerate .md files lacking a frontmatter description -> list:files"
+    actions:
+      - actor: codedoc
+        method: listMarkdownNoDescription
+        arguments: ["${dir}", "list:files"]
+
+  - states: ["3", "4"]
+    label: describe-sequential
+    note: "describe each file; parallelism 1 because the free vLLM node serves one query at a time"
+    actions:
+      - actor: parallel-map
+        method: run
+        arguments: ["${wf.dir}/describe-doc.yaml", "list:files", "list:status", 1]
+
+  - states: ["4", "end"]
+    label: done
+    actions:
+      - actor: out
+        method: error
+        arguments: "describe-corpus: done"
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "describe-corpus: unexpected state"

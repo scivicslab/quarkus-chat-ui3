@@ -1,0 +1,84 @@
+name: describe-doc
+description: |
+  Run once per Markdown file by parallel-map (from describe-corpus.yaml). str:input holds the file path.
+  Reads the file, asks the LLM for a <=5-line summary, and writes it into the file's frontmatter
+  `description` (idempotent: setFrontmatterDescription skips files that already have one). Self-contained:
+  loads its own plugins because parallel-map runs each task in an isolated IIActorSystem.
+
+steps:
+  - states: ["0", "1"]
+    label: load-codedoc
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-codedoc:1.0.0"
+
+  - states: ["1", "2"]
+    label: create-codedoc
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "codedoc", "com.scivicslab.turingworkflow.plugins.codedoc.CodeDocActor"]
+
+  - states: ["2", "3"]
+    label: load-llm
+    actions:
+      - actor: loader
+        method: loadJar
+        arguments: "com.scivicslab.turingworkflow.plugins:plugin-llm:1.5.0"
+
+  - states: ["3", "4"]
+    label: create-llm
+    actions:
+      - actor: loader
+        method: createChild
+        arguments: ["ROOT", "llm", "com.scivicslab.turingworkflow.plugins.llm.LlmActor"]
+
+  - states: ["4", "5"]
+    label: read-file
+    note: "read the document body into str:content"
+    actions:
+      - actor: codedoc
+        method: readFileToStr
+        arguments: ["$(str:input.get)", "str:content"]
+
+  - states: ["5", "6"]
+    label: configure-llm
+    note: "use the free vLLM node (5.17); set the summarizer prompt"
+    actions:
+      - actor: llm
+        method: setOpenAiUrl
+        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+      - actor: llm
+        method: setSystemPrompt
+        arguments: "あなたは技術文書の要約者です。与えられた Markdown 文書を読み、検索結果に出す短い説明文を日本語で 5 行以内で書きます。文書が、ある状態から別の状態への遷移を定義する状態機械文書なら、平坦な要約ではなく〈前提条件〉と〈遷移後に成り立つこと〉を簡潔に書きます。そうでなければ、その文書が何を説明する文書かを 5 行以内で要約します。クラス名・メソッド名・コマンド等の識別子は原語のまま残します。説明文だけを出力し、前置きや見出し・記号の飾りは付けません。"
+
+  - states: ["6", "7"]
+    label: summarize
+    actions:
+      - actor: llm
+        method: callOpenAi
+        arguments: "$(str:content.get)"
+
+  - states: ["7", "8"]
+    label: capture
+    note: "${result} holds the generated summary"
+    actions:
+      - actor: str:desc
+        method: set
+        arguments: "${result}"
+
+  - states: ["8", "end"]
+    label: write-description
+    note: "write the summary into the file's frontmatter description (idempotent)"
+    actions:
+      - actor: codedoc
+        method: setFrontmatterDescription
+        arguments: ["$(str:input.get)", "str:desc"]
+
+  - states: ["!end", "end"]
+    label: catch-all
+    actions:
+      - actor: out
+        method: error
+        arguments: "describe-doc: unexpected state"
