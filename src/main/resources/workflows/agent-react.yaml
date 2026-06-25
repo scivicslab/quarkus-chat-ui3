@@ -4,10 +4,13 @@ description: |
   repeated until the model answers in plain text instead of calling a tool (or the step limit / cancel
   ends it). Branching is by action success: stepExpectingAction succeeds only when the model returned
   tool_calls; otherwise (a text answer) it fails and the engine falls through to finish.
+  Behaviour is customised with Kustomize-style overlays (patch steps by label); labels mark the
+  overlay-targetable steps. note describes what each step does.
 
 steps:
   - states: ["0", "think"]
     label: start
+    note: "initialise the turn from the user's message"
     actions:
       - actor: agent
         method: start
@@ -15,27 +18,27 @@ steps:
 
   - states: ["think", "act"]
     label: think-action
-    note: "one LLM step; succeeds if the model returned native tool_calls"
+    note: "one LLM step; succeeds (-> act) only if the model returned native tool_calls"
     actions:
       - actor: agent
         method: stepExpectingAction
 
   - states: ["think", "end"]
     label: think-final
-    note: "step failed = text answer / step limit / cancelled -> finish"
+    note: "the model produced a text answer (or hit the step limit / was cancelled) -> finish the turn"
     actions:
       - actor: agent
         method: finish
 
   - states: ["act", "think"]
     label: run-tool
-    note: "execute the tool calls, append the observations, loop back to think"
+    note: "execute the requested tool calls, append the observations, loop back to think"
     actions:
       - actor: agent
         method: runTool
 
   - states: ["!end", "end"]
-    label: catch-all
+    note: "safety net: any unexpected state ends the loop"
     actions:
       - actor: out
         method: error

@@ -2,8 +2,10 @@ name: translate-document
 description: |
   Faithfully translate a (possibly long) document into Japanese, in parallel.
   chunk (deterministic) -> parallel-map(translate-chunk per chunk) -> join + write.
+  Behaviour is customised with Kustomize-style overlays (patch steps by label); labels mark the
+  overlay-targetable steps. note describes what each step does.
   Usage:
-    java -jar turing-workflow-3.7.0.jar run -w translate-document.yaml -d ~/works/workflow \
+    java -jar turing-workflow.jar run -w translate-document.yaml -d ~/works/workflow \
       -P in=/abs/in.md -P out=/abs/out.ja.md -m 2000
 
 params:
@@ -17,14 +19,14 @@ params:
 
 steps:
   - states: ["0", "1"]
-    label: load-codedoc
+    note: "load the deterministic code-doc plugin (chunk / write helpers)"
     actions:
       - actor: loader
         method: loadJar
         arguments: "com.scivicslab.turingworkflow.plugins:plugin-codedoc:1.0.0"
 
   - states: ["1", "2"]
-    label: create-codedoc
+    note: "create the codedoc actor under ROOT"
     actions:
       - actor: loader
         method: createChild
@@ -55,14 +57,14 @@ steps:
         arguments: ["${out}", "list:translated"]
 
   - states: ["5", "end"]
-    label: done
+    note: "report the written path"
     actions:
       - actor: out
         method: error
         arguments: "translate-document: wrote ${out}"
 
   - states: ["!end", "end"]
-    label: catch-all
+    note: "safety net: any unexpected state ends the workflow"
     actions:
       - actor: out
         method: error

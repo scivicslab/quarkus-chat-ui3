@@ -735,6 +735,8 @@
         parent.appendChild(box);
     }
 
+    // Renders the system steps read-only; after each insertion-point step (label ext-pre/ext-mid/
+    // ext-post) renders that point's editable user-extension box inline.
     function wfRender(yaml) {
         var list = document.getElementById('wf-list');
         if (!list) return;
