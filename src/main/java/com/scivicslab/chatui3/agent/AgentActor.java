@@ -48,6 +48,8 @@ public class AgentActor extends IIActorRef<Object> {
             "You are a helpful assistant. You can call the provided tools instead of guessing: 'read'\n"
           + "to fetch the actual contents of files/directories the user refers to, 'calc' for any\n"
           + "arithmetic, 'web_search' for current events or external facts not in the working directory,\n"
+          + "'fetch' to read the actual content of a URL (use it AFTER web_search, since search returns\n"
+          + "only snippets — fetch a result URL, or a JSON/data endpoint, to get the real content),\n"
           + "'search_docs' to look up the team's own internal documentation by meaning (use it first for\n"
           + "questions about this team's projects/systems/conventions), and 'write' to save text to a\n"
           + "file when the user asks to save/export something.\n"
@@ -295,6 +297,13 @@ public class AgentActor extends IIActorRef<Object> {
                + "or cite the results.",
                  "query",
                  "The search query, e.g. 'Quarkus 3.28 release notes' or 'vLLM tool calling gemma'."),
+            tool("fetch",
+                 "Fetch a URL and return its readable page content as text. Use this AFTER web_search to "
+               + "actually read a result page (search only returns titles/snippets, not the content). "
+               + "Also works for data/JSON API endpoints. Note: pages rendered by JavaScript return only "
+               + "their static skeleton — for those, fetch a JSON/data endpoint instead.",
+                 "url",
+                 "The absolute URL to fetch, e.g. https://quarkus.io/ or a JSON API URL."),
             tool("search_docs",
                  "Search the INTERNAL documentation (the team's own docs) by meaning and return matching "
                + "document titles, paths, and summaries. Use this first for questions about this team's "
@@ -449,6 +458,9 @@ public class AgentActor extends IIActorRef<Object> {
         if ("web_search".equals(tool)) {
             return WebSearchTool.search(input, WebSearchTool.DEFAULT_MAX_RESULTS);
         }
+        if ("fetch".equals(tool)) {
+            return FetchTool.fetch(input);
+        }
         if ("search_docs".equals(tool)) {
             return DocSearchTool.search(input, DocSearchTool.DEFAULT_MAX_RESULTS);
         }
@@ -483,22 +495,30 @@ public class AgentActor extends IIActorRef<Object> {
     }
 
     /**
-     * Extracts the single string argument from the model's tool-call {@code arguments} JSON. Tries the
-     * tool's declared parameter name first (path/expression), then falls back to the first string
-     * value, so a model that names the field differently still works.
+     * Extracts the single operative string argument from the model's tool-call {@code arguments} JSON.
+     * Each single-arg tool carries a {@code reason} plus one operative field; this resolves that field
+     * by name per tool, then falls back to the first string field that is NOT {@code reason}. Never
+     * returning {@code reason} is essential: the schema lists it first, so a plain "first string field"
+     * fallback would feed the reason text to the tool whenever the model emits reason first.
      */
     private String extractInput(String tool, String argumentsJson) {
-        String preferred = "calc".equals(tool) ? "expression" : "path";
+        String preferred = switch (tool) {
+            case "calc" -> "expression";
+            case "web_search", "search_docs" -> "query";
+            case "fetch" -> "url";
+            default -> "path";   // read, and any single-path tool
+        };
         try {
             JsonNode root = mapper.readTree(argumentsJson == null ? "{}" : argumentsJson);
             JsonNode pref = root.path(preferred);
             if (pref.isValueNode() && !pref.asText().isBlank()) {
                 return pref.asText();
             }
-            // Fallback: first string-valued field.
+            // Fallback: first string-valued field other than "reason".
             var it = root.fields();
             while (it.hasNext()) {
                 var e = it.next();
+                if ("reason".equals(e.getKey())) continue;
                 if (e.getValue().isValueNode() && !e.getValue().asText().isBlank()) {
                     return e.getValue().asText();
                 }
