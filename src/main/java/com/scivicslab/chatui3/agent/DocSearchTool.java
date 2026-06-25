@@ -139,16 +139,20 @@ public final class DocSearchTool {
         int count = 0;
         for (JsonNode hit : arr) {
             if (count >= maxResults) break;
+            String id = hit.path("id").asText("");
             String title = hit.path("title").asText("");
-            // Semantic results use "path"; full-text results use "pagePath".
-            String path = hit.hasNonNull("path") ? hit.path("path").asText("")
-                                                 : hit.path("pagePath").asText("");
+            // Served path (for a fetchable URL): semantic results use "path", full-text uses "pagePath".
+            String served = hit.hasNonNull("path") ? hit.path("path").asText("")
+                                                   : hit.path("pagePath").asText("");
+            String srcPath = hit.path("srcPath").asText("");   // absolute source .md path
             String summary = hit.path("summary").asText("");
-            if (title.isBlank() && path.isBlank()) continue;
+            if (title.isBlank() && served.isBlank() && srcPath.isBlank()) continue;
             sb.append(count + 1).append(". ").append(title).append("\n");
-            // Emit a directly-fetchable absolute URL (not just a path), so the agent can read the full
-            // document with the 'fetch' tool rather than guessing a local file path.
-            if (!path.isBlank()) sb.append("   url: ").append(toUrl(path)).append("\n");
+            if (!id.isBlank()) sb.append("   id: ").append(id).append("\n");
+            // Full source path (what the doc-site "Path" button shows).
+            if (!srcPath.isBlank()) sb.append("   path: ").append(srcPath).append("\n");
+            // Directly-fetchable URL, so the agent can read the full document with the 'fetch' tool.
+            if (!served.isBlank()) sb.append("   url: ").append(toUrl(served)).append("\n");
             if (!summary.isBlank()) sb.append("   ").append(summary).append("\n");
             sb.append("\n");
             count++;
