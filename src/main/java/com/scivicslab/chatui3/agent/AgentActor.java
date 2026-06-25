@@ -79,7 +79,14 @@ public class AgentActor extends IIActorRef<Object> {
           + "      instead of read when the user points at a whole project/folder to understand.\n"
           + "    * Faithfully translating an entire document into Japanese\n"
           + "      -> run_known_task(task='translate_document', path=<document file>).\n"
-          + "  The task result comes back as the observation; then present it as your final answer.";
+          + "  The task result comes back as the observation; then present it as your final answer.\n"
+          + "- DOC-FIRST GATE: before you BUILD ON, EXTEND, or IMPLEMENT WITH a framework, library, or\n"
+          + "  system — especially before adding a new capability to one — FIRST call 'search_docs' for\n"
+          + "  that framework's existing capabilities and conventions (use a specific concept word in the\n"
+          + "  query). Skim the returned titles/summaries, then call 'fetch' on the most relevant\n"
+          + "  result's url to read the full document before writing code — do not guess a local file\n"
+          + "  path. Do not reinvent something that already exists or violate an existing convention.\n"
+          + "  This gate applies to engineering tasks, not casual questions.";
 
     private final VllmClient vllmClient;
     private final ChatUiConfig config;
@@ -306,11 +313,13 @@ public class AgentActor extends IIActorRef<Object> {
                  "The absolute URL to fetch, e.g. https://quarkus.io/ or a JSON API URL."),
             tool("search_docs",
                  "Search the INTERNAL documentation (the team's own docs) by meaning and return matching "
-               + "document titles, paths, and summaries. Use this first for questions about this team's "
-               + "projects, systems, conventions, or how-tos before searching the web. Then cite the docs.",
+               + "document titles, a fetchable 'url:', and summaries. Use this first for questions about "
+               + "this team's projects, systems, conventions, or how-tos before searching the web. The "
+               + "summaries are short; to read a document's full text, call 'fetch' with its url (do not "
+               + "guess a local file path). Then cite the docs.",
                  "query",
-                 "A natural-language query about the internal docs, e.g. 'how Slurm job scheduling works' "
-               + "or 'POJO-actor の使い方'."),
+                 "A natural-language query about the internal docs. Include the SPECIFIC concept word, e.g. "
+               + "'Turing Workflow サブワークフロー 呼び出し' or 'POJO-actor tell ask の使い方', not just generic terms."),
             writeTool(),
             knownTaskTool());
 

@@ -87,7 +87,7 @@ public final class DocSearchTool {
                 String summary = textOf(r, ".result-summary");
                 if (title.isBlank() && path.isBlank()) continue;
                 sb.append(count + 1).append(". ").append(title).append("\n");
-                if (!path.isBlank()) sb.append("   path: ").append(path).append("\n");
+                if (!path.isBlank()) sb.append("   url: ").append(toUrl(path)).append("\n");
                 if (!summary.isBlank()) sb.append("   ").append(summary).append("\n");
                 sb.append("\n");
                 count++;
@@ -118,7 +118,9 @@ public final class DocSearchTool {
     private static String get(String url) throws Exception {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(20))
+                // Short per-attempt timeout: this backs an interactive gate, and there are up to three
+                // fallback attempts, so a slow/unresponsive html-saurus must not stall the turn.
+                .timeout(Duration.ofSeconds(8))
                 .header("Accept", "application/json")
                 .GET()
                 .build();
@@ -144,11 +146,20 @@ public final class DocSearchTool {
             String summary = hit.path("summary").asText("");
             if (title.isBlank() && path.isBlank()) continue;
             sb.append(count + 1).append(". ").append(title).append("\n");
-            if (!path.isBlank()) sb.append("   path: ").append(path).append("\n");
+            // Emit a directly-fetchable absolute URL (not just a path), so the agent can read the full
+            // document with the 'fetch' tool rather than guessing a local file path.
+            if (!path.isBlank()) sb.append("   url: ").append(toUrl(path)).append("\n");
             if (!summary.isBlank()) sb.append("   ").append(summary).append("\n");
             sb.append("\n");
             count++;
         }
         return count == 0 ? null : sb.toString().stripTrailing();
+    }
+
+    /** Turns a html-saurus served path into a fetchable absolute URL. */
+    private static String toUrl(String path) {
+        if (path == null || path.isBlank()) return "";
+        if (path.startsWith("http://") || path.startsWith("https://")) return path;
+        return BASE_URL + (path.startsWith("/") ? path : "/" + path);
     }
 }
