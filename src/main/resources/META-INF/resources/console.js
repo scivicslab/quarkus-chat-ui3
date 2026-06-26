@@ -713,12 +713,12 @@
         return { preamble: preamble.join('\n').replace(/\s+$/, ''), steps: steps };
     }
 
+    // Box heading: the step's transition direction (the states array) plus its 0-based step number,
+    // e.g. states ["0", "1"] -> '["0", "1"]   # step 0'. The label still appears in the YAML body.
     function wfStepTitle(text, idx) {
-        var m = text.match(/(^|\n)\s*label:\s*(.+)/);
-        if (m) return m[2].trim();
-        m = text.match(/(^|\n)\s*states:\s*(.+)/);
-        if (m) return 'states: ' + m[2].trim();
-        return 'step ' + (idx + 1);
+        var m = text.match(/(^|\n)\s*states:\s*(.+)/);
+        var states = m ? m[2].trim() : '';
+        return (states ? states + '   ' : '') + '# step ' + idx;
     }
 
     function wfRenderBox(parent, title, body, kind) {
