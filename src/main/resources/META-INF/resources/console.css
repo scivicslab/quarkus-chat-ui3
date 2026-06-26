@@ -268,6 +268,17 @@
 /* ── I/O tab (complete I/O viewer: agent-axis, filtered) ────────── */
 #io-session { background: var(--bg-secondary, #2a2a2a); color: var(--text-primary, #e6e6e6); border: 1px solid var(--border-color, #444); border-radius: 4px; padding: 3px 6px; font-size: 12px; max-width: 340px; }
 #io-status { color: var(--text-secondary, #8a8a8a); margin-left: auto; }
+/* Log DB tab = session manager: a table of conversations with cleanup + open-in-Trace. */
+#io-sessions { flex: 1; min-height: 0; overflow: auto; padding: 6px 8px; }
+.io-empty { color: var(--text-secondary, #8a8a8a); padding: 8px; font-size: 12px; }
+table.io-sessions { width: 100%; border-collapse: collapse; font-size: 12px; }
+table.io-sessions th { text-align: left; color: var(--text-secondary, #8a8a8a); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--border-color, #2c2c2c); position: sticky; top: 0; background: var(--bg-primary, #141414); }
+table.io-sessions td { padding: 4px 8px; border-bottom: 1px solid var(--border-color, #232323); color: var(--text-primary, #d4d4d4); vertical-align: top; }
+table.io-sessions tr:hover td { background: var(--bg-secondary, #1c1c1c); }
+.io-sess-actions { white-space: nowrap; text-align: right; }
+.io-sess-actions button { font-size: 11px; padding: 2px 7px; margin-left: 4px; border-radius: 4px; border: 1px solid var(--border-color, #444); background: var(--bg-secondary, #2a2a2a); color: var(--text-primary, #e6e6e6); cursor: pointer; }
+.io-sess-actions button:hover { border-color: var(--accent-blue, #a5b4fc); color: var(--accent-blue, #a5b4fc); }
+.io-sess-actions button.io-del:hover { border-color: var(--accent-red, #f87171); color: var(--accent-red, #f87171); }
 #io-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 #io-agents { width: 190px; flex-shrink: 0; overflow: auto; border-right: 1px solid var(--border-color, #2c2c2c); padding: 6px; font-size: 12px; }
 .io-agent { display: flex; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; color: var(--text-secondary, #b8b8b8); }

@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css?v=23">
+    <link rel="stylesheet" href="console.css?v=24">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -127,37 +127,17 @@
                 </section>
 
                 <section id="tab-logdb" class="rtab-content">
+                    <!-- Session manager: list conversations, clean up, open one in Trace.
+                         Reading a conversation turn-by-turn is the Trace tab; raw/arbitrary queries are SQL. -->
                     <div class="tab-toolbar">
-                        <label class="tab-auto">Session:
-                            <select id="io-session"></select>
-                        </label>
                         <button id="io-refresh" type="button">Refresh</button>
-                        <button id="io-del-session" type="button" title="Delete the selected session and all its logs">🗑 Delete session</button>
                         <span class="tab-auto" title="Delete sessions older than this many days (the active conversation is never deleted)">older than
                             <input id="io-del-days" type="number" value="30" min="0" max="3650" style="width:4em">d
                             <button id="io-del-old" type="button">Delete old</button>
                         </span>
                         <span id="io-status"></span>
                     </div>
-                    <div id="io-body">
-                        <div id="io-agents" title="Agents (actors) in this session"></div>
-                        <div id="io-main">
-                            <div class="io-filters">
-                                <input id="io-q" type="text" placeholder="text in message">
-                                <input id="io-label" type="text" placeholder="label (turn3, /llm, /tool)">
-                                <select id="io-level">
-                                    <option value="">level: all</option>
-                                    <option value="DEBUG">DEBUG</option>
-                                    <option value="INFO">INFO</option>
-                                    <option value="WARN">WARN</option>
-                                    <option value="ERROR">ERROR</option>
-                                </select>
-                                <label class="io-lim" title="Max records returned (one LLM call or one tool call = 1 record). Default 200.">max&nbsp;<input id="io-limit" type="number" value="200" min="1" max="1000"></label>
-                                <button id="io-apply" type="button">Apply</button>
-                            </div>
-                            <div id="io-entries"></div>
-                        </div>
-                    </div>
+                    <div id="io-sessions"></div>
                 </section>
 
                 <section id="tab-syslog" class="rtab-content">
@@ -195,6 +175,6 @@
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
     <script src="app.js?v=47"></script>
-    <script src="console.js?v=22"></script>
+    <script src="console.js?v=23"></script>
 </body>
 </html>

@@ -285,73 +285,81 @@
         applyAuto();
     }
 
-    // ── I/O tab (complete I/O viewer: session -> agent -> filtered raw I/O) ────
+    // ── Log DB tab (session manager: list conversations; clean up; open one in Trace) ──
+    // Reading a conversation turn-by-turn is the Trace tab's job; arbitrary queries are SQL's job.
+    // This tab only does the few typical operations: list sessions, delete / prune old, open in Trace.
     var ioSessionsLoaded = false;
-    var ioCurrentSession = null;   // shared by both tabs (only one is active at a time)
-    var ioCurrentAgent = '';   // '' = all agents (Log DB tab)
-
-    function ioFilters() {
-        return {
-            q: document.getElementById('io-q').value.trim(),
-            label: document.getElementById('io-label').value.trim(),
-            level: document.getElementById('io-level').value,
-            limit: document.getElementById('io-limit').value || '200'
-        };
-    }
+    var ioCurrentSession = null;   // shared with the Trace tab (only one tab is active at a time)
 
     function ioSetStatus(t) { var s = document.getElementById('io-status'); if (s) s.textContent = t; }
 
+    // Activates the Trace tab and loads the given session there (reuses the Trace per-turn view).
+    function openInTrace(sessionId) {
+        document.querySelectorAll('.rtab-btn').forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-tab') === 'trace');
+        });
+        document.querySelectorAll('.rtab-content').forEach(function (c) {
+            c.classList.toggle('active', c.id === 'tab-trace');
+        });
+        var p = traceSessionsLoaded ? Promise.resolve() : traceLoadSessions();
+        p.then(function () {
+            var sel = document.getElementById('trace-session');
+            if (sel) sel.value = String(sessionId);
+            ioCurrentSession = String(sessionId);
+            traceLoad();
+        });
+    }
+
+    function ioDeleteSession(id) {
+        if (!confirm('Delete session #' + id + ' and all its logs?')) return;
+        ioSetStatus('deleting…');
+        fetch('api/sessions/' + encodeURIComponent(id), { method: 'DELETE' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                ioSetStatus(j.deleted ? ('deleted session #' + id)
+                                      : (j.error || 'not deleted (active session is kept)'));
+                ioSessionsLoaded = false; ioLoadSessions();
+            })
+            .catch(function (e) { ioSetStatus('error: ' + e); });
+    }
+
     function ioLoadSessions() {
         return fetch('api/sessions').then(function (r) { return r.json(); }).then(function (list) {
-            var sel = document.getElementById('io-session');
-            sel.textContent = '';
-            (list || []).forEach(function (s) {
-                var o = document.createElement('option');
-                o.value = s.sessionId;
-                o.textContent = '#' + s.sessionId + '  ' + (s.workflowName || '') + '  ' + (s.startedAt || '');
-                sel.appendChild(o);
-            });
-            ioSessionsLoaded = true;
-            ioCurrentSession = (list && list.length) ? String((sel.value = String(list[0].sessionId))) : null;
-        });
-    }
-
-    function ioLoadAgents() {
-        if (!ioCurrentSession) return Promise.resolve();
-        return fetch('api/sessions/' + ioCurrentSession + '/agents').then(function (r) { return r.json(); }).then(function (list) {
-            var el = document.getElementById('io-agents');
+            var el = document.getElementById('io-sessions');
+            if (!el) return;
             el.textContent = '';
-            var all = document.createElement('div');
-            all.className = 'io-agent' + (ioCurrentAgent === '' ? ' active' : '');
-            all.textContent = 'All agents';
-            all.addEventListener('click', function () { ioCurrentAgent = ''; ioLoadAgents(); ioLoadLogs(); });
-            el.appendChild(all);
-            (list || []).forEach(function (a) {
-                var d = document.createElement('div');
-                d.className = 'io-agent' + (ioCurrentAgent === a.agent ? ' active' : '');
-                var n = document.createElement('span'); n.className = 'io-agent-name'; n.textContent = a.agent;
-                var c = document.createElement('span'); c.className = 'io-agent-count'; c.textContent = a.lines;
-                d.appendChild(n); d.appendChild(c);
-                d.addEventListener('click', function () { ioCurrentAgent = a.agent; ioLoadAgents(); ioLoadLogs(); });
-                el.appendChild(d);
+            list = list || [];
+            if (!list.length) {
+                var e = document.createElement('div'); e.className = 'io-empty'; e.textContent = 'No sessions.';
+                el.appendChild(e); ioSetStatus('0 sessions'); ioSessionsLoaded = true; return;
+            }
+            var tbl = document.createElement('table'); tbl.className = 'io-sessions';
+            var thead = document.createElement('thead');
+            thead.innerHTML = '<tr><th>#</th><th>started</th><th>workflow</th><th>entries</th><th></th></tr>';
+            tbl.appendChild(thead);
+            var tb = document.createElement('tbody');
+            list.forEach(function (s) {
+                var tr = document.createElement('tr');
+                function td(t) { var d = document.createElement('td'); d.textContent = t; return d; }
+                tr.appendChild(td('#' + s.sessionId));
+                tr.appendChild(td(s.startedAt || ''));
+                tr.appendChild(td(s.workflowName || ''));
+                tr.appendChild(td(s.totalLogEntries != null ? s.totalLogEntries : ''));
+                var act = document.createElement('td'); act.className = 'io-sess-actions';
+                var open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open in Trace';
+                open.addEventListener('click', function () { openInTrace(s.sessionId); });
+                var del = document.createElement('button'); del.type = 'button'; del.className = 'io-del';
+                del.title = 'Delete this session and all its logs'; del.textContent = '🗑';
+                del.addEventListener('click', function () { ioDeleteSession(s.sessionId); });
+                act.appendChild(open); act.appendChild(del);
+                tr.appendChild(act);
+                tb.appendChild(tr);
             });
-        });
-    }
-
-    function ioLoadLogs() {
-        var entriesEl = document.getElementById('io-entries');
-        if (!ioCurrentSession) { if (entriesEl) entriesEl.textContent = ''; ioSetStatus(''); return Promise.resolve(); }
-        var f = ioFilters();
-        var qs = new URLSearchParams();
-        if (ioCurrentAgent) qs.set('agent', ioCurrentAgent);
-        if (f.q) qs.set('q', f.q);
-        if (f.label) qs.set('label', f.label);
-        if (f.level) qs.set('level', f.level);
-        if (f.limit) qs.set('limit', f.limit);
-        return fetch('api/sessions/' + ioCurrentSession + '/logs?' + qs.toString())
-            .then(function (r) { return r.json(); })
-            .then(function (page) { ioRenderEntries(page); })
-            .catch(function (err) { ioSetStatus('error: ' + err.message); });
+            tbl.appendChild(tb);
+            el.appendChild(tbl);
+            ioSessionsLoaded = true;
+            ioSetStatus(list.length + ' session(s)');
+        }).catch(function (err) { ioSetStatus('error: ' + err.message); });
     }
 
     // ── Trace tab (agent-loop reconstruction: per-turn directional messages) ──
@@ -631,31 +639,12 @@
     }
 
     function ioOnShow() {
-        var p = ioSessionsLoaded ? Promise.resolve() : ioLoadSessions();
-        p.then(function () { return ioLoadAgents(); }).then(function () { return ioLoadLogs(); });
+        if (!ioSessionsLoaded) ioLoadSessions();
     }
 
     function initIo() {
-        var sessionSel = document.getElementById('io-session');
-        if (sessionSel) sessionSel.addEventListener('change', function () {
-            ioCurrentSession = sessionSel.value; ioCurrentAgent = ''; ioLoadAgents(); ioLoadLogs();
-        });
         var refresh = document.getElementById('io-refresh');
-        if (refresh) refresh.addEventListener('click', function () { ioSessionsLoaded = false; ioOnShow(); });
-        var delSession = document.getElementById('io-del-session');
-        if (delSession) delSession.addEventListener('click', function () {
-            if (!ioCurrentSession) { ioSetStatus('no session selected'); return; }
-            if (!confirm('Delete session #' + ioCurrentSession + ' and all its logs?')) return;
-            ioSetStatus('deleting…');
-            fetch('api/sessions/' + encodeURIComponent(ioCurrentSession), { method: 'DELETE' })
-                .then(function (r) { return r.json(); })
-                .then(function (j) {
-                    ioSetStatus(j.deleted ? ('deleted session #' + ioCurrentSession)
-                                          : (j.error || 'not deleted (active session is kept)'));
-                    ioSessionsLoaded = false; ioOnShow();
-                })
-                .catch(function (e) { ioSetStatus('error: ' + e); });
-        });
+        if (refresh) refresh.addEventListener('click', function () { ioSessionsLoaded = false; ioLoadSessions(); });
         var delOld = document.getElementById('io-del-old');
         if (delOld) delOld.addEventListener('click', function () {
             var d = document.getElementById('io-del-days');
@@ -667,14 +656,10 @@
                 .then(function (r) { return r.json(); })
                 .then(function (j) {
                     ioSetStatus('deleted ' + (j.deleted || 0) + ' session(s) older than ' + days + 'd');
-                    ioSessionsLoaded = false; ioOnShow();
+                    ioSessionsLoaded = false; ioLoadSessions();
                 })
                 .catch(function (e) { ioSetStatus('error: ' + e); });
         });
-        var apply = document.getElementById('io-apply');
-        if (apply) apply.addEventListener('click', ioLoadLogs);
-        var q = document.getElementById('io-q');
-        if (q) q.addEventListener('keydown', function (e) { if (e.key === 'Enter') ioLoadLogs(); });
     }
 
     // ── Right-pane config bar (live LLM settings via /api/config) ─────────────
