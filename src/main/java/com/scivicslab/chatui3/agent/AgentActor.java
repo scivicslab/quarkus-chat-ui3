@@ -7,8 +7,7 @@ import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.context.ContextBudget;
 import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
-import com.scivicslab.chatui3.llm.LlmProvider;
-import com.scivicslab.chatui3.llm.LogContext;
+import com.scivicslab.chatui3.llm.VllmClient;
 import com.scivicslab.chatui3.llm.VllmResponse;
 import com.scivicslab.chatui3.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.Action;
@@ -96,7 +95,7 @@ public class AgentActor extends IIActorRef<Object> {
           + "  they came from. (web_search returns the title and URL of every result, so you always have\n"
           + "  them.) Write the section in the user's language.";
 
-    private final LlmProvider vllmClient;
+    private final VllmClient vllmClient;
     private final ChatUiConfig config;
     private final ActorRef<SseActor> sseRef;
     private final ConversationStore conversation;
@@ -133,7 +132,7 @@ public class AgentActor extends IIActorRef<Object> {
     private volatile Thread worker;
     private volatile boolean cancelled;
 
-    public AgentActor(String name, LlmProvider vllmClient, ChatUiConfig config,
+    public AgentActor(String name, VllmClient vllmClient, ChatUiConfig config,
             ActorRef<SseActor> sseRef, ConversationStore conversation, IIActorSystem system,
             IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source,
             WorkflowDispatcher dispatcher) {
@@ -185,10 +184,10 @@ public class AgentActor extends IIActorRef<Object> {
             // from the final answer). thinkingStep() marks this step's start so the UI can drop it if
             // it becomes the final answer (otherwise the same text would show twice).
             sseRef.tell(a -> a.emit(ChatEvent.thinkingStep()));
-            // The LLM call is recorded at the shared provider logging point via this LogContext. Tool
-            // schemas are sent so the model can answer with native tool_calls (vLLM backend only).
-            LogContext logCtx =
-                    new LogContext(sessionId, "agent", "turn" + turnNo + "/step" + stepCount + "/llm");
+            // The LLM call is recorded at the shared VllmClient point via this LogContext. Tool schemas
+            // are sent so the model can answer with native tool_calls.
+            VllmClient.LogContext logCtx =
+                    new VllmClient.LogContext(sessionId, "agent", "turn" + turnNo + "/step" + stepCount + "/llm");
             vllmClient.streamCompletion(messages, config, null, TOOLS, logCtx,
                     fragment -> sseRef.tell(a -> a.emit(ChatEvent.thinking(fragment))),
                     resp -> respHolder[0] = resp);

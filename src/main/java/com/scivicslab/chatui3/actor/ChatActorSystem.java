@@ -3,9 +3,6 @@ package com.scivicslab.chatui3.actor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.iolog.IoLogStore;
-import com.scivicslab.chatui3.llm.ClaudeCodeProvider;
-import com.scivicslab.chatui3.llm.CodexProvider;
-import com.scivicslab.chatui3.llm.LlmProvider;
 import com.scivicslab.chatui3.llm.SseBatchLogger;
 import com.scivicslab.chatui3.llm.VllmClient;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -38,11 +35,6 @@ public class ChatActorSystem {
 
     @ConfigProperty(name = "chatui3.vllm-base-url")
     String vllmBaseUrl;
-
-    // Selects the LLM backend: "vllm" (default), "claude", or "codex". Set at launch via
-    // -Dchatui3.backend=… (the AI workspace passes the value chosen in its launch form).
-    @ConfigProperty(name = "chatui3.backend", defaultValue = "vllm")
-    String backend;
 
     @ConfigProperty(name = "chatui3.model")
     Optional<String> defaultModel;
@@ -95,33 +87,18 @@ public class ChatActorSystem {
         });
         logScheduler.scheduleAtFixedRate(() -> batchRef.tell(SseBatchLogger::tick), 5, 5, TimeUnit.SECONDS);
 
-        ChatUiConfig config    = new ChatUiConfig(vllmBaseUrl, defaultModel.orElse(""), defaultTemperature, defaultMaxTokens);
-        LlmProvider llmProvider = createLlmProvider();
+        ChatUiConfig config   = new ChatUiConfig(vllmBaseUrl, defaultModel.orElse(""), defaultTemperature, defaultMaxTokens);
+        VllmClient vllmClient = new VllmClient(objectMapper, batchRef, ioLog);
 
         SseActor sseActor = new SseActor(objectMapper);
         sseActorRef = rootRef.createChild("sse", sseActor);
 
-        ChatActor chatActor = new ChatActor(llmProvider, config, ioLog);
+        ChatActor chatActor = new ChatActor(vllmClient, config, ioLog);
         chatActorRef = rootRef.createChild("chat", chatActor);
         chatActorRef.tell(a -> a.setSseRef(sseActorRef));
         chatActorRef.tell(a -> a.setSelfRef(chatActorRef));
 
-        LOG.info("ChatActorSystem initialized (backend=" + backend + ", vllm=" + vllmBaseUrl + ")");
-    }
-
-    /**
-     * Creates a fresh {@link LlmProvider} for the configured backend. A new instance per caller keeps
-     * cancel() isolated to that caller's in-flight call (the single-shot path and the agent loop each
-     * hold their own). The vLLM backend tees responses to the shared windowed batch logger; the CLI
-     * backends shell out to {@code claude}/{@code codex} as near-bare LLMs.
-     */
-    public LlmProvider createLlmProvider() {
-        String b = (backend == null ? "vllm" : backend.trim().toLowerCase());
-        return switch (b) {
-            case "claude" -> new ClaudeCodeProvider(objectMapper, ioLog);
-            case "codex"  -> new CodexProvider(objectMapper, ioLog);
-            default       -> new VllmClient(objectMapper, batchRef, ioLog);
-        };
+        LOG.info("ChatActorSystem initialized (vllm=" + vllmBaseUrl + ")");
     }
 
     @PreDestroy

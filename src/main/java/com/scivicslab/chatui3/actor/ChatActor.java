@@ -2,8 +2,7 @@ package com.scivicslab.chatui3.actor;
 
 import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.iolog.IoLogStore;
-import com.scivicslab.chatui3.llm.LlmProvider;
-import com.scivicslab.chatui3.llm.LogContext;
+import com.scivicslab.chatui3.llm.VllmClient;
 import com.scivicslab.chatui3.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActorRef;
 
@@ -16,14 +15,13 @@ import java.util.logging.Logger;
 
 /**
  * Owns session state: message history and ChatUiConfig.
- * Delegates LLM I/O to the selected {@link LlmProvider} on a virtual thread so the actor mailbox
- * stays unblocked.
+ * Delegates LLM I/O to VllmClient on a virtual thread so the actor mailbox stays unblocked.
  */
 public class ChatActor {
 
     private static final Logger LOG = Logger.getLogger(ChatActor.class.getName());
 
-    private final LlmProvider vllmClient;
+    private final VllmClient vllmClient;
     private final IoLogStore ioLog;
     private final List<Map<String, Object>> messages = new ArrayList<>();
     private int turnCount = 0;
@@ -31,7 +29,7 @@ public class ChatActor {
     private ChatUiConfig config;
     private ActorRef<SseActor> sseRef;
 
-    public ChatActor(LlmProvider vllmClient, ChatUiConfig config, IoLogStore ioLog) {
+    public ChatActor(VllmClient vllmClient, ChatUiConfig config, IoLogStore ioLog) {
         this.vllmClient = vllmClient;
         this.config     = config;
         this.ioLog      = ioLog;
@@ -57,9 +55,9 @@ public class ChatActor {
         if (ioLog != null && sessionId < 0) {
             sessionId = ioLog.startNamedSession("chatui3-workflow");
         }
-        // The LLM call is recorded at the shared provider logging point via this context.
-        LogContext logCtx =
-                new LogContext(sessionId, "agent", "turn" + turnNumber + "/llm");
+        // The LLM call is recorded at the shared VllmClient point via this context.
+        VllmClient.LogContext logCtx =
+                new VllmClient.LogContext(sessionId, "agent", "turn" + turnNumber + "/llm");
 
         // Copy messages snapshot for the virtual thread (messages list must not be modified mid-flight)
         List<Map<String, Object>> snapshot = List.copyOf(messages);
