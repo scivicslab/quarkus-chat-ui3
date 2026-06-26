@@ -400,6 +400,14 @@
         if (sel) sel.addEventListener('change', function () { ioCurrentSession = sel.value; traceLoad(); });
         var refresh = document.getElementById('trace-refresh');
         if (refresh) refresh.addEventListener('click', function () { traceSessionsLoaded = false; traceOnShow(); });
+        var collapse = document.getElementById('trace-collapse');
+        if (collapse) collapse.addEventListener('click', function () {
+            document.querySelectorAll('#trace-list .tr-turn').forEach(function (d) { d.open = false; });
+        });
+        var expand = document.getElementById('trace-expand');
+        if (expand) expand.addEventListener('click', function () {
+            document.querySelectorAll('#trace-list .tr-turn').forEach(function (d) { d.open = true; });
+        });
     }
 
     function ioRenderTrace(turns) {
@@ -412,8 +420,8 @@
         }
         var msgCount = 0;
         turns.forEach(function (t) {
-            var box = document.createElement('div'); box.className = 'tr-turn';
-            var head = document.createElement('div'); head.className = 'tr-turn-head';
+            var box = document.createElement('details'); box.className = 'tr-turn'; box.open = true;
+            var head = document.createElement('summary'); head.className = 'tr-turn-head';
             head.textContent = 'Turn ' + t.turn;
             box.appendChild(head);
             var msgs = ioTurnMessages(t);
