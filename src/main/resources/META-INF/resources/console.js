@@ -587,14 +587,6 @@
     function initIo() {
         var refresh = document.getElementById('io-refresh');
         if (refresh) refresh.addEventListener('click', function () { ioSessionsLoaded = false; ioLoadSessions(); });
-        var collapse = document.getElementById('io-collapse');
-        if (collapse) collapse.addEventListener('click', function () {
-            document.querySelectorAll('#io-sessions .sess').forEach(function (d) { d.open = false; });
-        });
-        var expand = document.getElementById('io-expand');
-        if (expand) expand.addEventListener('click', function () {
-            document.querySelectorAll('#io-sessions .sess').forEach(function (d) { d.open = true; });
-        });
         var delOld = document.getElementById('io-del-old');
         if (delOld) delOld.addEventListener('click', function () {
             var d = document.getElementById('io-del-days');
