@@ -36,7 +36,7 @@ public final class WebSearchTool {
     static final int DEFAULT_MAX_RESULTS = 10;
     /** How many top results to fetch full content for, and how much of each to include. */
     static final int FETCH_TOP_N = 10;
-    static final int PER_RESULT_CHARS = 650;   // ~10 * (650 + overhead) stays within the observation budget
+    static final int PER_RESULT_CHARS = 600;   // ~10 * (600 + overhead) stays within the observation budget
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))

@@ -87,7 +87,13 @@ public class AgentActor extends IIActorRef<Object> {
           + "  query). Skim the returned titles/summaries, then call 'fetch' on the most relevant\n"
           + "  result's url to read the full document before writing code — do not guess a local file\n"
           + "  path. Do not reinvent something that already exists or violate an existing convention.\n"
-          + "  This gate applies to engineering tasks, not casual questions.";
+          + "  This gate applies to engineering tasks, not casual questions.\n"
+          + "- WEB SOURCES: whenever your answer draws on web_search, end the answer with a 'Sources'\n"
+          + "  section. First list EVERY result you searched, one per line as '<n>. <title> — <URL>'.\n"
+          + "  Then add a 'References (actually used)' line naming the subset of those URLs whose content\n"
+          + "  you actually relied on for the answer, and attribute concrete facts to the specific URL\n"
+          + "  they came from. (web_search returns the title and URL of every result, so you always have\n"
+          + "  them.) Write the section in the user's language.";
 
     private final VllmClient vllmClient;
     private final ChatUiConfig config;
