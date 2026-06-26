@@ -279,6 +279,15 @@ table.io-sessions tr:hover td { background: var(--bg-secondary, #1c1c1c); }
 .io-sess-actions button { font-size: 11px; padding: 2px 7px; margin-left: 4px; border-radius: 4px; border: 1px solid var(--border-color, #444); background: var(--bg-secondary, #2a2a2a); color: var(--text-primary, #e6e6e6); cursor: pointer; }
 .io-sess-actions button:hover { border-color: var(--accent-blue, #a5b4fc); color: var(--accent-blue, #a5b4fc); }
 .io-sess-actions button.io-del:hover { border-color: var(--accent-red, #f87171); color: var(--accent-red, #f87171); }
+/* Each session is a collapsible card; expanding it shows its turn-by-turn trace inline. */
+details.sess { border: 1px solid var(--border-color, #2f2f2f); border-radius: 6px; margin: 0 0 8px; background: var(--bg-secondary, #1b1b1b); overflow: hidden; }
+summary.sess-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; user-select: none; list-style-position: inside; color: var(--text-primary, #d4d4d4); font-size: 12px; }
+summary.sess-head:hover { background: var(--bg-tertiary, #232323); }
+.sess-meta { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-head .io-del { font-size: 11px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border-color, #444); background: var(--bg-secondary, #2a2a2a); color: var(--text-secondary, #b8b8b8); cursor: pointer; }
+.sess-head .io-del:hover { border-color: var(--accent-red, #f87171); color: var(--accent-red, #f87171); }
+.sess-body { padding: 6px 8px; border-top: 1px solid var(--border-color, #2f2f2f); }
+details.sess:not([open]) > .sess-head { border-top: none; }
 #io-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
 #io-agents { width: 190px; flex-shrink: 0; overflow: auto; border-right: 1px solid var(--border-color, #2c2c2c); padding: 6px; font-size: 12px; }
 .io-agent { display: flex; justify-content: space-between; gap: 6px; padding: 4px 6px; border-radius: 4px; cursor: pointer; color: var(--text-secondary, #b8b8b8); }

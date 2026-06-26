@@ -58,7 +58,6 @@
             document.querySelectorAll('.rtab-content').forEach(function (c) {
                 c.classList.toggle('active', c.id === 'tab-' + tab);
             });
-            if (tab === 'trace') traceOnShow();
             if (tab === 'actors') refreshActors();
             if (tab === 'logdb') ioOnShow();
             if (tab === 'syslog') refreshLogs();
@@ -285,30 +284,13 @@
         applyAuto();
     }
 
-    // ── Log DB tab (session manager: list conversations; clean up; open one in Trace) ──
-    // Reading a conversation turn-by-turn is the Trace tab's job; arbitrary queries are SQL's job.
-    // This tab only does the few typical operations: list sessions, delete / prune old, open in Trace.
+    // ── Sessions tab (list conversations; read each inline; clean up) ──
+    // Each session is a collapsible row: expanding it loads that conversation's turn-by-turn trace
+    // (request <-> response <-> tool I/O) inline. Arbitrary queries are SQL's job — no raw-log browser.
     var ioSessionsLoaded = false;
-    var ioCurrentSession = null;   // shared with the Trace tab (only one tab is active at a time)
+    var ioCurrentSession = null;   // vestigial; the inline trace threads its own session id
 
     function ioSetStatus(t) { var s = document.getElementById('io-status'); if (s) s.textContent = t; }
-
-    // Activates the Trace tab and loads the given session there (reuses the Trace per-turn view).
-    function openInTrace(sessionId) {
-        document.querySelectorAll('.rtab-btn').forEach(function (b) {
-            b.classList.toggle('active', b.getAttribute('data-tab') === 'trace');
-        });
-        document.querySelectorAll('.rtab-content').forEach(function (c) {
-            c.classList.toggle('active', c.id === 'tab-trace');
-        });
-        var p = traceSessionsLoaded ? Promise.resolve() : traceLoadSessions();
-        p.then(function () {
-            var sel = document.getElementById('trace-session');
-            if (sel) sel.value = String(sessionId);
-            ioCurrentSession = String(sessionId);
-            traceLoad();
-        });
-    }
 
     function ioDeleteSession(id) {
         if (!confirm('Delete session #' + id + ' and all its logs?')) return;
@@ -333,103 +315,55 @@
                 var e = document.createElement('div'); e.className = 'io-empty'; e.textContent = 'No sessions.';
                 el.appendChild(e); ioSetStatus('0 sessions'); ioSessionsLoaded = true; return;
             }
-            var tbl = document.createElement('table'); tbl.className = 'io-sessions';
-            var thead = document.createElement('thead');
-            thead.innerHTML = '<tr><th>#</th><th>started</th><th>workflow</th><th>entries</th><th></th></tr>';
-            tbl.appendChild(thead);
-            var tb = document.createElement('tbody');
-            list.forEach(function (s) {
-                var tr = document.createElement('tr');
-                function td(t) { var d = document.createElement('td'); d.textContent = t; return d; }
-                tr.appendChild(td('#' + s.sessionId));
-                tr.appendChild(td(s.startedAt || ''));
-                tr.appendChild(td(s.workflowName || ''));
-                tr.appendChild(td(s.totalLogEntries != null ? s.totalLogEntries : ''));
-                var act = document.createElement('td'); act.className = 'io-sess-actions';
-                var open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open in Trace';
-                open.addEventListener('click', function () { openInTrace(s.sessionId); });
-                var del = document.createElement('button'); del.type = 'button'; del.className = 'io-del';
-                del.title = 'Delete this session and all its logs'; del.textContent = '🗑';
-                del.addEventListener('click', function () { ioDeleteSession(s.sessionId); });
-                act.appendChild(open); act.appendChild(del);
-                tr.appendChild(act);
-                tb.appendChild(tr);
-            });
-            tbl.appendChild(tb);
-            el.appendChild(tbl);
+            list.forEach(function (s) { el.appendChild(ioSessionEl(s)); });
             ioSessionsLoaded = true;
             ioSetStatus(list.length + ' session(s)');
         }).catch(function (err) { ioSetStatus('error: ' + err.message); });
     }
 
-    // ── Trace tab (agent-loop reconstruction: per-turn directional messages) ──
-    var traceSessionsLoaded = false;
-    function traceSetStatus(t) { var s = document.getElementById('trace-status'); if (s) s.textContent = t; }
-
-    function traceLoadSessions() {
-        return fetch('api/sessions').then(function (r) { return r.json(); }).then(function (list) {
-            var sel = document.getElementById('trace-session');
-            sel.textContent = '';
-            (list || []).forEach(function (s) {
-                var o = document.createElement('option');
-                o.value = s.sessionId;
-                o.textContent = '#' + s.sessionId + '  ' + (s.workflowName || '') + '  ' + (s.startedAt || '');
-                sel.appendChild(o);
-            });
-            traceSessionsLoaded = true;
-            ioCurrentSession = (list && list.length) ? String((sel.value = String(list[0].sessionId))) : null;
+    // One session as a collapsible row: the header shows its meta + a delete button; expanding it lazily
+    // loads and renders that session's turn-by-turn trace inline.
+    function ioSessionEl(s) {
+        var det = document.createElement('details'); det.className = 'sess';
+        var sum = document.createElement('summary'); sum.className = 'sess-head';
+        var meta = document.createElement('span'); meta.className = 'sess-meta';
+        meta.textContent = '#' + s.sessionId + '  ·  ' + (s.startedAt || '') + '  ·  '
+                         + (s.workflowName || '') + '  ·  '
+                         + (s.totalLogEntries != null ? s.totalLogEntries + ' entries' : '');
+        var del = document.createElement('button'); del.type = 'button'; del.className = 'io-del';
+        del.title = 'Delete this session and all its logs'; del.textContent = '🗑';
+        del.addEventListener('click', function (ev) { ev.preventDefault(); ev.stopPropagation(); ioDeleteSession(s.sessionId); });
+        sum.appendChild(meta); sum.appendChild(del);
+        det.appendChild(sum);
+        var body = document.createElement('div'); body.className = 'sess-body'; body.textContent = 'loading…';
+        det.appendChild(body);
+        var loaded = false;
+        det.addEventListener('toggle', function () {
+            if (!det.open || loaded) return;
+            loaded = true;
+            fetch('api/sessions/' + s.sessionId + '/trace')
+                .then(function (r) { return r.json(); })
+                .then(function (turns) { ioRenderTraceInto(body, turns || [], s.sessionId); })
+                .catch(function (err) { body.textContent = 'error: ' + err.message; loaded = false; });
         });
+        return det;
     }
 
-    function traceLoad() {
-        var el = document.getElementById('trace-list');
-        if (!ioCurrentSession) { if (el) el.textContent = ''; traceSetStatus(''); return Promise.resolve(); }
-        return fetch('api/sessions/' + ioCurrentSession + '/trace')
-            .then(function (r) { return r.json(); })
-            .then(function (turns) { ioRenderTrace(turns || []); })
-            .catch(function (err) { traceSetStatus('error: ' + err.message); });
-    }
-
-    function traceOnShow() {
-        var p = traceSessionsLoaded ? Promise.resolve() : traceLoadSessions();
-        p.then(function () { return traceLoad(); });
-    }
-
-    function initTrace() {
-        var sel = document.getElementById('trace-session');
-        if (sel) sel.addEventListener('change', function () { ioCurrentSession = sel.value; traceLoad(); });
-        var refresh = document.getElementById('trace-refresh');
-        if (refresh) refresh.addEventListener('click', function () { traceSessionsLoaded = false; traceOnShow(); });
-        var collapse = document.getElementById('trace-collapse');
-        if (collapse) collapse.addEventListener('click', function () {
-            document.querySelectorAll('#trace-list .tr-turn').forEach(function (d) { d.open = false; });
-        });
-        var expand = document.getElementById('trace-expand');
-        if (expand) expand.addEventListener('click', function () {
-            document.querySelectorAll('#trace-list .tr-turn').forEach(function (d) { d.open = true; });
-        });
-    }
-
-    function ioRenderTrace(turns) {
-        var el = document.getElementById('trace-list');
+    // ── Trace rendering (per-turn directional messages), shown inline inside a Sessions row ──
+    function ioRenderTraceInto(el, turns, sessionId) {
         el.textContent = '';
         if (!turns.length) {
             var none = document.createElement('div'); none.className = 'io-empty';
-            none.textContent = 'No agent-loop trace in this session.'; el.appendChild(none);
-            traceSetStatus('0 turns'); return;
+            none.textContent = 'No agent-loop trace in this session.'; el.appendChild(none); return;
         }
-        var msgCount = 0;
         turns.forEach(function (t) {
             var box = document.createElement('details'); box.className = 'tr-turn'; box.open = true;
             var head = document.createElement('summary'); head.className = 'tr-turn-head';
             head.textContent = 'Turn ' + t.turn;
             box.appendChild(head);
-            var msgs = ioTurnMessages(t);
-            msgCount += msgs.length;
-            msgs.forEach(function (m) { box.appendChild(ioMsgEl(m)); });
+            ioTurnMessages(t).forEach(function (m) { box.appendChild(ioMsgEl(m, sessionId)); });
             el.appendChild(box);
         });
-        traceSetStatus(turns.length + ' turn(s), ' + msgCount + ' messages');
     }
 
     // Flattens a turn into an ordered list of one-direction MESSAGES (the basic unit). Each log entry
@@ -468,7 +402,7 @@
 
     // One directional message: a summary line (with its "who → whom" tag + color) that expands to show
     // ONLY that direction's full text, fetched lazily from the source log entry.
-    function ioMsgEl(m) {
+    function ioMsgEl(m, sessionId) {
         var det = document.createElement('details'); det.className = 'trm ' + m.cls;
         var sum = document.createElement('summary'); sum.className = 'trm-sum';
         var dir = document.createElement('span'); dir.className = 'trm-dir'; dir.textContent = m.dir;
@@ -482,7 +416,7 @@
             if (!det.open || loaded) return;
             loaded = true;
             if (m.id < 0) { body.textContent = '(no source entry)'; return; }
-            fetch('api/sessions/' + ioCurrentSession + '/entry/' + m.id)
+            fetch('api/sessions/' + sessionId + '/entry/' + m.id)
                 .then(function (r) { return r.json(); })
                 .then(function (d) { ioRenderPart(body, d.message || '', m.part); })
                 .catch(function (err) { body.textContent = 'error: ' + err.message; loaded = false; });
@@ -653,6 +587,14 @@
     function initIo() {
         var refresh = document.getElementById('io-refresh');
         if (refresh) refresh.addEventListener('click', function () { ioSessionsLoaded = false; ioLoadSessions(); });
+        var collapse = document.getElementById('io-collapse');
+        if (collapse) collapse.addEventListener('click', function () {
+            document.querySelectorAll('#io-sessions .sess').forEach(function (d) { d.open = false; });
+        });
+        var expand = document.getElementById('io-expand');
+        if (expand) expand.addEventListener('click', function () {
+            document.querySelectorAll('#io-sessions .sess').forEach(function (d) { d.open = true; });
+        });
         var delOld = document.getElementById('io-del-old');
         if (delOld) delOld.addEventListener('click', function () {
             var d = document.getElementById('io-del-days');
@@ -833,9 +775,8 @@
         initLogs();
         initActors();
         initIo();
-        initTrace();
         initConfig();
         initWorkflow();
-        traceOnShow();   // Trace is the default active tab; load it on startup.
+        ioOnShow();   // Sessions is the default active tab; load it on startup.
     });
 })();

@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css?v=25">
+    <link rel="stylesheet" href="console.css?v=26">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -97,28 +97,14 @@
 
         <div id="right-panel">
             <div id="right-tab-bar">
-                <button class="rtab-btn active" data-tab="trace">Trace</button>
+                <button class="rtab-btn active" data-tab="logdb">Sessions</button>
                 <button class="rtab-btn" data-tab="actors">Actors</button>
-                <button class="rtab-btn" data-tab="logdb">Log DB</button>
                 <button class="rtab-btn" data-tab="syslog">System Log</button>
                 <button class="rtab-btn" data-tab="workflow">Workflow</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
             <div class="rtab-body">
-                <section id="tab-trace" class="rtab-content active">
-                    <div class="tab-toolbar">
-                        <label class="tab-auto">Session:
-                            <select id="trace-session"></select>
-                        </label>
-                        <button id="trace-refresh" type="button">Refresh</button>
-                        <button id="trace-collapse" type="button" title="Collapse all turns">Collapse all</button>
-                        <button id="trace-expand" type="button" title="Expand all turns">Expand all</button>
-                        <span id="trace-status"></span>
-                    </div>
-                    <div id="trace-list"></div>
-                </section>
-
                 <section id="tab-actors" class="rtab-content">
                     <div class="tab-toolbar">
                         <button id="actors-refresh" type="button">Refresh</button>
@@ -128,11 +114,13 @@
                     <div id="actors-tree"></div>
                 </section>
 
-                <section id="tab-logdb" class="rtab-content">
-                    <!-- Session manager: list conversations, clean up, open one in Trace.
-                         Reading a conversation turn-by-turn is the Trace tab; raw/arbitrary queries are SQL. -->
+                <section id="tab-logdb" class="rtab-content active">
+                    <!-- Sessions: list conversations; expand one to read its turn-by-turn trace inline;
+                         clean up. Arbitrary/raw queries are SQL's job. -->
                     <div class="tab-toolbar">
                         <button id="io-refresh" type="button">Refresh</button>
+                        <button id="io-collapse" type="button" title="Collapse all sessions">Collapse all</button>
+                        <button id="io-expand" type="button" title="Expand all sessions">Expand all</button>
                         <span class="tab-auto" title="Delete sessions older than this many days (the active conversation is never deleted)">older than
                             <input id="io-del-days" type="number" value="30" min="0" max="3650" style="width:4em">d
                             <button id="io-del-old" type="button">Delete old</button>
@@ -177,6 +165,6 @@
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
     <script src="app.js?v=47"></script>
-    <script src="console.js?v=24"></script>
+    <script src="console.js?v=25"></script>
 </body>
 </html>
