@@ -28,21 +28,36 @@ steps:
 
   - states: ["think", "act"]
     label: think-action
-    note: "THE single LLM call of this iteration, with the tool schemas offered. If the model returns native tool_calls -> SUCCESS -> go to 'act' (run-tool). If it returns plain text instead, that text IS the final answer (captured here) and this step FAILS, so the engine takes the other transition out of 'think' -> 'end' (think-final)."
+    note: |
+      THE single LLM call of this iteration, with the tool schemas offered.
+      - If the model returns native tool_calls -> SUCCESS -> go to "act" (run-tool).
+      - If it returns plain text instead, that text IS the final answer (captured
+        here) and this step FAILS, so the engine takes the other transition out of
+        "think" -> "end" (think-final).
     actions:
       - actor: agent
         method: stepExpectingAction
 
   - states: ["think", "end"]
     label: think-final
-    note: "No tool was called: emit the final answer the LLM already produced in think-action (or end quietly on step-limit / cancel). This does NOT call the LLM — it only returns the captured answer and ends the turn. This transition is think -> end; it is reached only when think-action failed (no tool_calls)."
+    note: |
+      No tool was called: emit the final answer the LLM already produced in
+      think-action (or end quietly on step-limit / cancel). This does NOT call the
+      LLM — it only returns the captured answer and ends the turn.
+      This transition is think -> end; reached only when think-action failed
+      (no tool_calls).
     actions:
       - actor: agent
         method: finish
 
   - states: ["act", "think"]
     label: run-tool
-    note: "A tool WAS called: execute the requested tool_calls (read / write / calc / web_search / fetch / search_docs / run_known_task — run_known_task dispatches the known Turing Workflows understand-project or translate-document), append each observation, then loop back to 'think' for the next LLM call."
+    note: |
+      A tool WAS called: execute the requested tool_calls
+      (read / write / calc / web_search / fetch / search_docs / run_known_task --
+      run_known_task dispatches the known Turing Workflows understand-project or
+      translate-document), append each observation, then loop back to "think" for
+      the next LLM call.
     actions:
       - actor: agent
         method: runTool
