@@ -47,9 +47,10 @@ public class AgentActor extends IIActorRef<Object> {
     private static final String SYSTEM_PROMPT =
             "You are a helpful assistant. You can call the provided tools instead of guessing: 'read'\n"
           + "to fetch the actual contents of files/directories the user refers to, 'calc' for any\n"
-          + "arithmetic, 'web_search' for current events or external facts not in the working directory,\n"
-          + "'fetch' to read the actual content of a URL (use it AFTER web_search, since search returns\n"
-          + "only snippets — fetch a result URL, or a JSON/data endpoint, to get the real content),\n"
+          + "arithmetic, 'web_search' for current events or external facts not in the working directory\n"
+          + "(it searches AND retrieves the top result pages' actual content, not just snippets, so you do\n"
+          + "not need a separate fetch step), 'fetch' to read one specific URL you already have (e.g. a URL\n"
+          + "the user gave, or a JSON/data endpoint),\n"
           + "'search_docs' to look up the team's own internal documentation by meaning (use it first for\n"
           + "questions about this team's projects/systems/conventions), and 'write' to save text to a\n"
           + "file when the user asks to save/export something.\n"
@@ -299,16 +300,17 @@ public class AgentActor extends IIActorRef<Object> {
                  "expression",
                  "A Java expression, e.g. 23*47 or Math.sqrt(16) or (1000.0/3)"),
             tool("web_search",
-                 "Search the web (DuckDuckGo) and return titles, URLs, and snippets. Use this for "
-               + "current events, external facts, or anything not in the working directory. Then read "
-               + "or cite the results.",
+                 "Search the web (DuckDuckGo) AND retrieve the top result pages' actual content (not just "
+               + "snippets) — it fetches the pages for you. Returns, per result, the title, URL, and a "
+               + "page-content excerpt. Use this for current events, external facts, or anything not in "
+               + "the working directory; you do NOT need to call 'fetch' afterwards. Then cite the results.",
                  "query",
                  "The search query, e.g. 'Quarkus 3.28 release notes' or 'vLLM tool calling gemma'."),
             tool("fetch",
-                 "Fetch a URL and return its readable page content as text. Use this AFTER web_search to "
-               + "actually read a result page (search only returns titles/snippets, not the content). "
-               + "Also works for data/JSON API endpoints. Note: pages rendered by JavaScript return only "
-               + "their static skeleton — for those, fetch a JSON/data endpoint instead.",
+                 "Fetch ONE specific URL you already have and return its readable page content as text — "
+               + "e.g. a URL the user gave you, a link from an earlier result, or a JSON/data API endpoint. "
+               + "(For open-ended web lookups use 'web_search', which already fetches the top pages.) Note: "
+               + "pages rendered by JavaScript return only their static skeleton — fetch a JSON/data endpoint instead.",
                  "url",
                  "The absolute URL to fetch, e.g. https://quarkus.io/ or a JSON API URL."),
             tool("search_docs",
@@ -465,7 +467,9 @@ public class AgentActor extends IIActorRef<Object> {
             return FileReadTool.read(java.nio.file.Path.of("").toAbsolutePath(), input);
         }
         if ("web_search".equals(tool)) {
-            return WebSearchTool.search(input, WebSearchTool.DEFAULT_MAX_RESULTS);
+            // Deterministic: search AND fetch the top results' page content in one step, so the model
+            // never has to decide to call 'fetch' afterwards.
+            return WebSearchTool.searchAndFetch(input);
         }
         if ("fetch".equals(tool)) {
             return FetchTool.fetch(input);
