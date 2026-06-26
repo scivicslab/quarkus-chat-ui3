@@ -1,16 +1,26 @@
 name: agent-react
 description: |
-  In-process agent loop (entry B) using the model's NATIVE function calling. think -> act -> observe,
-  repeated until the model answers in plain text instead of calling a tool (or the step limit / cancel
-  ends it). Branching is by action success: stepExpectingAction succeeds only when the model returned
-  tool_calls; otherwise (a text answer) it fails and the engine falls through to finish.
-  Behaviour is customised with Kustomize-style overlays (patch steps by label); labels mark the
-  overlay-targetable steps. note describes what each step does.
+  In-process agent loop (entry B) using the model's NATIVE function calling.
+  Shape: start -> ( think -> act )* -> finish.
+
+  ONE LLM call happens per "think" iteration, inside stepExpectingAction, and that single call decides
+  the branch:
+    - the model returns native tool_calls  -> the step SUCCEEDS -> go to "act": runTool executes the
+      tools, appends their observations, and loops back to "think" for the next LLM call.
+    - the model returns plain text instead  -> that text IS the final answer; it is captured right
+      there, and the step FAILS, so the engine falls through to the other transition out of "think"
+      (-> end), which is finish.
+  So the final answer is produced by the LLM inside stepExpectingAction (the no-tool branch). finish
+  does NOT call the LLM — it only emits the already-captured answer and ends the turn.
+
+  Branching is by action success (a step "fails" when its action returns failure, and the engine then
+  tries the next transition with the same from-state). Behaviour is customised with Kustomize-style
+  overlays (patch steps by label); labels mark the overlay-targetable steps; note explains each step.
 
 steps:
   - states: ["0", "think"]
     label: start
-    note: "initialise the turn from the user's message"
+    note: "Initialise the turn from the user's message (no LLM call here)."
     actions:
       - actor: agent
         method: start
@@ -18,27 +28,27 @@ steps:
 
   - states: ["think", "act"]
     label: think-action
-    note: "one LLM step; succeeds (-> act) only if the model returned native tool_calls"
+    note: "THE single LLM call of this iteration, with the tool schemas offered. If the model returns native tool_calls -> SUCCESS -> go to 'act' (run-tool). If it returns plain text instead, that text IS the final answer (captured here) and this step FAILS, so the engine takes the other transition out of 'think' -> 'end' (think-final)."
     actions:
       - actor: agent
         method: stepExpectingAction
 
   - states: ["think", "end"]
     label: think-final
-    note: "the model produced a text answer (or hit the step limit / was cancelled) -> finish the turn"
+    note: "No tool was called: emit the final answer the LLM already produced in think-action (or end quietly on step-limit / cancel). This does NOT call the LLM — it only returns the captured answer and ends the turn. This transition is think -> end; it is reached only when think-action failed (no tool_calls)."
     actions:
       - actor: agent
         method: finish
 
   - states: ["act", "think"]
     label: run-tool
-    note: "execute the requested tool calls, append the observations, loop back to think"
+    note: "A tool WAS called: execute the requested tool_calls (read / write / calc / web_search / fetch / search_docs / run_known_task — run_known_task dispatches the known Turing Workflows understand-project or translate-document), append each observation, then loop back to 'think' for the next LLM call."
     actions:
       - actor: agent
         method: runTool
 
   - states: ["!end", "end"]
-    note: "safety net: any unexpected state ends the loop"
+    note: "Safety net: any unexpected state ends the loop."
     actions:
       - actor: out
         method: error
