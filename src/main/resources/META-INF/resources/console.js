@@ -716,7 +716,8 @@
     // Box heading: the step's transition direction (the states array) plus its 0-based step number,
     // e.g. states ["0", "1"] -> '["0", "1"]   # step 0'. The label still appears in the YAML body.
     function wfStepTitle(text, idx) {
-        var m = text.match(/(^|\n)\s*states:\s*(.+)/);
+        // states: sits on the step's first line "  - states: [...]"; allow the leading "- ".
+        var m = text.match(/(^|\n)\s*-?\s*states:\s*(.+)/);
         var states = m ? m[2].trim() : '';
         return (states ? states + '   ' : '') + '# step ' + idx;
     }
