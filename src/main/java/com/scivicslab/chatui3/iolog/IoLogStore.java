@@ -24,8 +24,9 @@ import java.util.logging.Logger;
  *
  * <p>One H2 "session" = one browser conversation: a session is opened on first use and reused across
  * turns; {@code resetSession()} (memory reset) ends it. The DB path is a startup property
- * ({@code chatui3.iolog.db-path}); when unset it defaults to a relative path, i.e. created in the
- * current working directory ({@code ./chatui3-iolog.mv.db}), mirroring actor-IaC's convention.</p>
+ * ({@code chatui3.iolog.db-path}, default {@code chatui3-iolog}) with the instance's HTTP port
+ * appended, so each instance opens its own file (e.g. {@code ./chatui3-iolog-18090.mv.db}). The port
+ * suffix keeps two instances from sharing one H2 store via {@code AUTO_SERVER}.</p>
  *
  * <p>Logging is best-effort: if the DB cannot be opened, the rest of the app keeps working and the
  * complete log is simply unavailable.</p>
@@ -38,11 +39,22 @@ public class IoLogStore {
     @ConfigProperty(name = "chatui3.iolog.db-path", defaultValue = "chatui3-iolog")
     String dbPath;
 
+    // The instance's HTTP port, appended to the DB path so two chat-ui3 instances on different ports
+    // never open the same H2 file. H2 opens with AUTO_SERVER=TRUE, so without this a second process
+    // would connect into the first instance's database and the two would write to one shared store.
+    @ConfigProperty(name = "quarkus.http.port", defaultValue = "8080")
+    int httpPort;
+
     // Lossless MVStore compression for the complete-I/O log: the logged content is highly repetitive
     // (the full request JSON is re-serialized every step), so compression shrinks the .mv.db file
     // several-fold with no loss. Applies to newly written data.
     @ConfigProperty(name = "chatui3.iolog.compress", defaultValue = "true")
     boolean compress;
+
+    /** The configured db-path with the instance's HTTP port appended (per-instance DB isolation). */
+    private String dbPathForPort() {
+        return dbPath + "-" + httpPort;
+    }
 
     private DistributedLogStore store;
     private ExecutorService dbExecutor;
@@ -62,13 +74,13 @@ public class IoLogStore {
             return;
         }
         try {
-            store = new H2LogStore(Path.of(dbPath), compress);
+            store = new H2LogStore(Path.of(dbPathForPort()), compress);
             dbExecutor = Executors.newSingleThreadExecutor(r -> {
                 Thread t = new Thread(r, "iolog-db");
                 t.setDaemon(true);
                 return t;
             });
-            LOG.info("I/O log DB opened: " + Path.of(dbPath).toAbsolutePath() + ".mv.db"
+            LOG.info("I/O log DB opened: " + Path.of(dbPathForPort()).toAbsolutePath() + ".mv.db"
                     + " (compress=" + compress + ")");
         } catch (Exception e) {
             failed = true;
@@ -217,7 +229,7 @@ public class IoLogStore {
 
     /** The same JDBC URL H2LogStore uses, for a short-lived maintenance connection. */
     private String jdbcUrl() {
-        return "jdbc:h2:" + Path.of(dbPath).toAbsolutePath() + ";AUTO_SERVER=TRUE"
+        return "jdbc:h2:" + Path.of(dbPathForPort()).toAbsolutePath() + ";AUTO_SERVER=TRUE"
                 + (compress ? ";COMPRESS=TRUE" : "");
     }
 
