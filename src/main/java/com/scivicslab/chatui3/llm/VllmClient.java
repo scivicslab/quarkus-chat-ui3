@@ -28,7 +28,7 @@ import java.util.logging.Logger;
  * Uses java.net.http.HttpClient so that vLLM-specific fields (e.g. stream_options)
  * are passed through without SDK limitations.
  */
-public class VllmClient {
+public class VllmClient implements LlmProvider {
 
     private static final Logger LOG = Logger.getLogger(VllmClient.class.getName());
 
@@ -43,9 +43,6 @@ public class VllmClient {
 
     /** Shared complete-I/O log (s_iolog). May be null (logging disabled / tests). */
     private final IoLogStore ioLog;
-
-    /** Per-call logging context: which session/node/label this vLLM call is recorded under. */
-    public record LogContext(long sessionId, String node, String label) {}
 
     public VllmClient(ObjectMapper mapper) {
         this(mapper, null, null);

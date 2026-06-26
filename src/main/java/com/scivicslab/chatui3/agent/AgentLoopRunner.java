@@ -7,7 +7,7 @@ import com.scivicslab.chatui3.actor.SseActor;
 import com.scivicslab.chatui3.config.ChatUiConfig;
 import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
-import com.scivicslab.chatui3.llm.VllmClient;
+import com.scivicslab.chatui3.llm.LlmProvider;
 import com.scivicslab.chatui3.rest.ChatEvent;
 import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
@@ -72,7 +72,7 @@ public class AgentLoopRunner {
     @ConfigProperty(name = "chatui3.context-window", defaultValue = "32768")
     int contextWindow;
 
-    private VllmClient vllmClient;
+    private LlmProvider vllmClient;
 
     /** The agent actor of the currently running loop, or null. Used by cancelCurrent(). */
     private volatile AgentActor currentAgent;
@@ -82,9 +82,9 @@ public class AgentLoopRunner {
 
     @PostConstruct
     void init() {
-        // Share the batch logger with the single-shot path so the browser agent loop's responses
-        // are logged in the same windowed JSON form.
-        this.vllmClient = new VllmClient(mapper, chatSystem.getSseBatchLoggerRef(), ioLog);
+        // Use the configured backend (vllm/claude/codex). A fresh provider instance keeps this loop's
+        // cancel() isolated from the single-shot path; the vLLM backend shares the windowed batch logger.
+        this.vllmClient = chatSystem.createLlmProvider();
     }
 
     /** Starts the agent loop for one user message on a virtual thread (returns immediately). */
