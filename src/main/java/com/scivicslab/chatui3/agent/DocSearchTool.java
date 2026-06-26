@@ -2,6 +2,7 @@ package com.scivicslab.chatui3.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -86,6 +87,27 @@ public final class DocSearchTool {
         for (JsonNode h : recall) {
             if (recallAdded >= limit) break;
             if (seen.add(dedupeKey(h))) { merged.add(h); recallAdded++; }
+        }
+
+        // 3) Table-of-contents proximity: add the top hit's same-folder neighbours (deterministic,
+        // from the directory tree). Tagged "[same folder]" so the agent knows why they are here.
+        if (!merged.isEmpty()) {
+            String topId = merged.get(0).path("id").asText("");
+            if (!topId.isBlank()) {
+                List<JsonNode> sibs = fetchHits(BASE_URL + "/api/siblings?id="
+                        + URLEncoder.encode(topId, StandardCharsets.UTF_8), "siblings", query);
+                int sibAdded = 0;
+                for (JsonNode h : sibs) {
+                    if (sibAdded >= 5) break;
+                    if (seen.add(dedupeKey(h))) {
+                        if (h instanceof ObjectNode on) {
+                            on.put("summary", "[same folder] " + on.path("summary").asText(""));
+                        }
+                        merged.add(h);
+                        sibAdded++;
+                    }
+                }
+            }
         }
         return formatHits(merged);
     }
