@@ -255,6 +255,26 @@ public class ChatResource {
         return ioLogView.agents(id);
     }
 
+    /** Deletes one log session and all its logs/node_results. Refuses the active conversation session. */
+    @DELETE
+    @Path("/sessions/{id}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response deleteSession(@PathParam("id") long id) {
+        int n = ioLog.deleteSession(id);
+        if (n < 0) return Response.status(500).entity(Map.of("error", "delete failed")).build();
+        return Response.ok(Map.of("deleted", n)).build();
+    }
+
+    /** Bulk-deletes sessions started more than {@code days} days ago (active session excluded). */
+    @DELETE
+    @Path("/sessions/old")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response deleteOldSessions(@QueryParam("days") @DefaultValue("30") int days) {
+        int n = ioLog.deleteSessionsOlderThan(days);
+        if (n < 0) return Response.status(500).entity(Map.of("error", "delete failed")).build();
+        return Response.ok(Map.of("deleted", n, "olderThanDays", days)).build();
+    }
+
     /**
      * Returns a shaped, filtered, bounded page of one session's I/O. Filters (any may be omitted):
      * {@code agent} (node_id), {@code label} (turn/step/llm|tool substring), {@code level}

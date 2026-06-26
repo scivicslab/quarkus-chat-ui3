@@ -132,6 +132,11 @@
                             <select id="io-session"></select>
                         </label>
                         <button id="io-refresh" type="button">Refresh</button>
+                        <button id="io-del-session" type="button" title="Delete the selected session and all its logs">🗑 Delete session</button>
+                        <span class="tab-auto" title="Delete sessions older than this many days (the active conversation is never deleted)">older than
+                            <input id="io-del-days" type="number" value="30" min="0" max="3650" style="width:4em">d
+                            <button id="io-del-old" type="button">Delete old</button>
+                        </span>
                         <span id="io-status"></span>
                     </div>
                     <div id="io-body">
@@ -190,6 +195,6 @@
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
     <script src="app.js?v=47"></script>
-    <script src="console.js?v=21"></script>
+    <script src="console.js?v=22"></script>
 </body>
 </html>

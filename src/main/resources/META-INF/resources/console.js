@@ -642,6 +642,35 @@
         });
         var refresh = document.getElementById('io-refresh');
         if (refresh) refresh.addEventListener('click', function () { ioSessionsLoaded = false; ioOnShow(); });
+        var delSession = document.getElementById('io-del-session');
+        if (delSession) delSession.addEventListener('click', function () {
+            if (!ioCurrentSession) { ioSetStatus('no session selected'); return; }
+            if (!confirm('Delete session #' + ioCurrentSession + ' and all its logs?')) return;
+            ioSetStatus('deleting…');
+            fetch('api/sessions/' + encodeURIComponent(ioCurrentSession), { method: 'DELETE' })
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    ioSetStatus(j.deleted ? ('deleted session #' + ioCurrentSession)
+                                          : (j.error || 'not deleted (active session is kept)'));
+                    ioSessionsLoaded = false; ioOnShow();
+                })
+                .catch(function (e) { ioSetStatus('error: ' + e); });
+        });
+        var delOld = document.getElementById('io-del-old');
+        if (delOld) delOld.addEventListener('click', function () {
+            var d = document.getElementById('io-del-days');
+            var days = d ? parseInt(d.value, 10) : 30;
+            if (isNaN(days) || days < 0) { ioSetStatus('enter a valid day count'); return; }
+            if (!confirm('Delete ALL sessions older than ' + days + ' day(s)? (the active conversation is kept)')) return;
+            ioSetStatus('deleting…');
+            fetch('api/sessions/old?days=' + days, { method: 'DELETE' })
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                    ioSetStatus('deleted ' + (j.deleted || 0) + ' session(s) older than ' + days + 'd');
+                    ioSessionsLoaded = false; ioOnShow();
+                })
+                .catch(function (e) { ioSetStatus('error: ' + e); });
+        });
         var apply = document.getElementById('io-apply');
         if (apply) apply.addEventListener('click', ioLoadLogs);
         var q = document.getElementById('io-q');

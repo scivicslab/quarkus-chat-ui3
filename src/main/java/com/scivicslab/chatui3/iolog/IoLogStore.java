@@ -9,6 +9,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.logging.Level;
@@ -202,6 +205,86 @@ public class IoLogStore {
             s.endSession(sessionId, SessionStatus.COMPLETED);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "endSession failed", e);
+        }
+    }
+
+    // ---- Maintenance: prune old / unwanted log data ------------------------
+    //
+    // Deletes run over a short-lived, separate JDBC connection (H2 AUTO_SERVER mode allows multiple
+    // connections to the same DB), so they never touch H2LogStore's read/write connections. The active
+    // conversation session is always excluded, and only non-active sessions are removed, so a delete
+    // never contends with the rows currently being written.
+
+    /** The same JDBC URL H2LogStore uses, for a short-lived maintenance connection. */
+    private String jdbcUrl() {
+        return "jdbc:h2:" + Path.of(dbPath).toAbsolutePath() + ";AUTO_SERVER=TRUE"
+                + (compress ? ";COMPRESS=TRUE" : "");
+    }
+
+    /**
+     * Deletes one session and all of its logs / node_results. Refuses to delete the active
+     * conversation session. Returns the number of sessions deleted (1 or 0), or -1 on error.
+     */
+    public synchronized int deleteSession(long id) {
+        if (id < 0) return 0;
+        if (id == sessionId) {
+            LOG.warning("Refusing to delete the active conversation session " + id);
+            return 0;
+        }
+        try (Connection c = DriverManager.getConnection(jdbcUrl())) {
+            c.setAutoCommit(false);
+            try {
+                update(c, "DELETE FROM logs WHERE session_id = ?", id);
+                update(c, "DELETE FROM node_results WHERE session_id = ?", id);
+                int n = update(c, "DELETE FROM sessions WHERE id = ?", id);
+                c.commit();
+                LOG.info("Deleted log session " + id + " (" + n + " row)");
+                return n;
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "deleteSession failed for " + id, e);
+            return -1;
+        }
+    }
+
+    /**
+     * Deletes every session started more than {@code days} days ago (and its logs / node_results),
+     * excluding the active conversation session. Returns the number of sessions deleted, or -1 on error.
+     */
+    public synchronized int deleteSessionsOlderThan(int days) {
+        if (days < 0) return 0;
+        String pred = "started_at < DATEADD('DAY', ?, CURRENT_TIMESTAMP) AND id <> ?";
+        try (Connection c = DriverManager.getConnection(jdbcUrl())) {
+            c.setAutoCommit(false);
+            try {
+                update(c, "DELETE FROM logs WHERE session_id IN (SELECT id FROM sessions WHERE " + pred + ")",
+                        -days, sessionId);
+                update(c, "DELETE FROM node_results WHERE session_id IN (SELECT id FROM sessions WHERE " + pred + ")",
+                        -days, sessionId);
+                int n = update(c, "DELETE FROM sessions WHERE " + pred, -days, sessionId);
+                c.commit();
+                LOG.info("Deleted " + n + " session(s) older than " + days + " day(s)");
+                return n;
+            } catch (Exception e) {
+                c.rollback();
+                throw e;
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "deleteSessionsOlderThan failed", e);
+            return -1;
+        }
+    }
+
+    /** Runs one parameterized update/delete and returns the affected-row count. */
+    private static int update(Connection c, String sql, Object... params) throws Exception {
+        try (PreparedStatement ps = c.prepareStatement(sql)) {
+            for (int i = 0; i < params.length; i++) {
+                ps.setObject(i + 1, params[i]);
+            }
+            return ps.executeUpdate();
         }
     }
 
