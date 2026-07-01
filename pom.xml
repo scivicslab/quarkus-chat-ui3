@@ -6,7 +6,7 @@
 
   <groupId>com.scivicslab.chatui3</groupId>
   <artifactId>quarkus-chat-ui3</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.0-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <properties>
