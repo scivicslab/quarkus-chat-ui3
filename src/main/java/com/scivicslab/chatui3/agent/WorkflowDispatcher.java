@@ -65,9 +65,94 @@ public class WorkflowDispatcher {
     /** Extracted-once temp directory holding the workflow YAMLs. */
     private volatile Path workflowDir;
 
-    /** True if {@code task} names a known, dispatchable workflow task. */
+    /** True if {@code task} names a known, bundled workflow task. */
     public boolean isKnownTask(String task) {
         return task != null && TASKS.containsKey(task);
+    }
+
+    /**
+     * Runs a user-defined external workflow from {@code ~/works/workflow/<name>.yaml}.
+     * Injects an {@code out} parameter pointing to a temp file; reads and returns that file's
+     * contents as the observation after the workflow completes.
+     *
+     * <p>The workflow YAML must accept an {@code out} parameter and write its result there
+     * (e.g. using {@code ocr.writeFile}). If the file is empty after completion, the workflow's
+     * console output is returned instead.</p>
+     *
+     * @param name       workflow filename without the {@code .yaml} extension
+     * @param userParams workflow-specific parameters supplied by the LLM
+     * @return the workflow's text result, or an {@code error: ...} string on failure
+     */
+    public String runExternal(String name, Map<String, String> userParams) {
+        if (name == null || name.isBlank()) {
+            return "error: workflow name required";
+        }
+        String home = System.getProperty("user.home", System.getenv().getOrDefault("HOME", "~"));
+        Path wfDir  = Path.of(home, "works", "workflow");
+        Path yamlFile = wfDir.resolve(name + ".yaml");
+        if (!Files.exists(yamlFile)) {
+            return "error: workflow not found: " + name
+                    + " (looked in " + wfDir + "). Call search_tools to find available workflows.";
+        }
+        try {
+            Path out = Files.createTempFile("chatui3-ext-" + name + "-", ".md");
+            Map<String, String> params = new LinkedHashMap<>(userParams != null ? userParams : Map.of());
+            params.put("out", out.toString());
+
+            LOG.info("runExternal: workflow=" + name + " out=" + out + " params=" + params.keySet());
+            runExternalWorkflow(yamlFile, params);
+
+            String body = Files.readString(out);
+            try { Files.deleteIfExists(out); } catch (Exception ignore) { /* best effort */ }
+
+            if (body.isBlank()) {
+                return "error: workflow '" + name + "' completed but wrote no output to the 'out' file. "
+                        + "The workflow YAML must write its result using ocr.writeFile or similar.";
+            }
+            return "Workflow '" + name + "' result:\n\n" + body;
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "runExternal failed for workflow " + name, e);
+            return "error: workflow '" + name + "' failed: " + e.getMessage();
+        }
+    }
+
+    /** Runs one external workflow YAML file to completion, seeding the given params. */
+    private void runExternalWorkflow(Path yamlFile, Map<String, String> params) throws Exception {
+        IIActorSystem system = new IIActorSystem("dispatch-ext");
+        try {
+            Interpreter interp = new Interpreter.Builder()
+                    .loggerName("dispatch-ext")
+                    .team(system)
+                    .build();
+            interp.setWorkflowBaseDir(yamlFile.getParent().toString());
+
+            system.addIIActor(new DynamicActorLoaderIIAR("loader", system));
+            MultiplexerAccumulator mux = new MultiplexerAccumulator();
+            mux.addTarget(new ConsoleAccumulator());
+            system.addIIActor(new MultiplexerAccumulatorIIAR("log", mux, system));
+            system.addIIActor(new VarsActor(system, new HashMap<>()));
+            InterpreterIIAR interpreterActor = new InterpreterIIAR("interpreter", interp, system);
+            interp.setSelfActorRef(interpreterActor);
+            system.addIIActor(interpreterActor);
+
+            try (InputStream in = Files.newInputStream(yamlFile)) {
+                interp.readYaml(in);
+            }
+            for (Map.Entry<String, String> e : params.entrySet()) {
+                interpreterActor.callByActionName("putJson", new JSONObject()
+                        .put("path", e.getKey())
+                        .put("value", e.getValue())
+                        .toString());
+            }
+
+            ActionResult r = interp.runUntilEnd(MAX_ITERATIONS);
+            if (!r.isSuccess()) {
+                throw new IllegalStateException("workflow did not complete: " + r.getResult());
+            }
+        } finally {
+            system.terminateIIActors();
+            system.terminate();
+        }
     }
 
     /**

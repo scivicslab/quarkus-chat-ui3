@@ -81,6 +81,12 @@ public class AgentActor extends IIActorRef<Object> {
           + "    * Faithfully translating an entire document into Japanese\n"
           + "      -> run_known_task(task='translate_document', path=<document file>).\n"
           + "  The task result comes back as the observation; then present it as your final answer.\n"
+          + "- For other tasks (arXiv summarization, OCR, domain-specific processing), user-defined\n"
+          + "  workflows may be available. The two-step process:\n"
+          + "    1. FIRST call 'search_tools' with a descriptive query (e.g. 'arXiv PDF summarize')\n"
+          + "       to discover available workflows and learn their required parameters.\n"
+          + "    2. THEN call 'run_workflow' with the workflow name and a JSON params string.\n"
+          + "  Never guess a workflow name; always search first.\n"
           + "- DOC-FIRST GATE: before you BUILD ON, EXTEND, or IMPLEMENT WITH a framework, library, or\n"
           + "  system — especially before adding a new capability to one — FIRST call 'search_docs' for\n"
           + "  that framework's existing capabilities and conventions (use a specific concept word in the\n"
@@ -119,6 +125,9 @@ public class AgentActor extends IIActorRef<Object> {
     // deterministic Turing Workflow. Backs the 'run_known_task' tool.
     private final WorkflowDispatcher dispatcher;
 
+    // Lucene in-memory index over ~/works/workflow/*.yaml. Backs the 'search_tools' tool.
+    private final WorkflowIndex workflowIndex;
+
     // per-turn working memory
     private String question;
     private int turnNo;   // conversation turn number, for labelling I/O log entries
@@ -135,7 +144,7 @@ public class AgentActor extends IIActorRef<Object> {
     public AgentActor(String name, VllmClient vllmClient, ChatUiConfig config,
             ActorRef<SseActor> sseRef, ConversationStore conversation, IIActorSystem system,
             IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source,
-            WorkflowDispatcher dispatcher) {
+            WorkflowDispatcher dispatcher, WorkflowIndex workflowIndex) {
         super(name, new Object(), system);
         this.vllmClient    = vllmClient;
         this.config        = config;
@@ -147,6 +156,7 @@ public class AgentActor extends IIActorRef<Object> {
         this.mapper        = mapper;
         this.source        = source;
         this.dispatcher    = dispatcher;
+        this.workflowIndex = workflowIndex;
     }
 
     /** Initialises the turn from the user's message. */
@@ -329,7 +339,15 @@ public class AgentActor extends IIActorRef<Object> {
                  "A natural-language query about the internal docs. Include the SPECIFIC concept word, e.g. "
                + "'Turing Workflow サブワークフロー 呼び出し' or 'POJO-actor tell ask の使い方', not just generic terms."),
             writeTool(),
-            knownTaskTool());
+            knownTaskTool(),
+            tool("search_tools",
+                 "Search the user's available workflows by meaning and return their names, descriptions, "
+               + "and required parameters. ALWAYS call this before run_workflow — never guess a workflow "
+               + "name. Use it when the user asks for a task that might be handled by a workflow (e.g. "
+               + "arXiv summarization, PDF OCR, domain-specific processing).",
+                 "query",
+                 "Natural-language description of the task, e.g. 'arXiv PDF summarize' or 'OCR Japanese PDF'."),
+            runWorkflowTool());
 
     /**
      * Builds the schema for {@code write}: save text to a file under the working directory. Two
@@ -400,6 +418,42 @@ public class AgentActor extends IIActorRef<Object> {
                 + "files yourself. Use for understanding/documenting a whole code project, or faithfully "
                 + "translating a whole document. Returns the generated document as the observation.");
         fn.put("parameters", params);
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("type", "function");
+        t.put("function", fn);
+        return t;
+    }
+
+    /**
+     * Builds the schema for {@code run_workflow}: runs a user-defined workflow found via
+     * {@code search_tools}. Two parameters beyond {@code reason}: {@code workflow} (the name returned
+     * by search_tools) and {@code params} (a JSON-encoded object of workflow-specific key-value pairs).
+     */
+    private static Map<String, Object> runWorkflowTool() {
+        Map<String, Object> reason = new LinkedHashMap<>();
+        reason.put("type", "string");
+        reason.put("description", "Why you are running this workflow now. One concise sentence.");
+        Map<String, Object> workflow = new LinkedHashMap<>();
+        workflow.put("type", "string");
+        workflow.put("description", "Workflow name exactly as returned by search_tools (without .yaml extension).");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("type", "string");
+        params.put("description", "JSON object string of workflow-specific parameters as shown by search_tools, "
+                + "e.g. \"{\\\"arxiv.id\\\": \\\"2511.08544\\\"}\".");
+        Map<String, Object> props = new LinkedHashMap<>();
+        props.put("reason",   reason);
+        props.put("workflow", workflow);
+        props.put("params",   params);
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("type", "object");
+        parameters.put("properties", props);
+        parameters.put("required", List.of("reason", "workflow", "params"));
+        Map<String, Object> fn = new LinkedHashMap<>();
+        fn.put("name", "run_workflow");
+        fn.put("description", "Run a user-defined workflow found via search_tools. Returns the workflow "
+                + "result as text for use as the observation. Always call search_tools first to get the "
+                + "correct workflow name and required parameters.");
+        fn.put("parameters", parameters);
         Map<String, Object> t = new LinkedHashMap<>();
         t.put("type", "function");
         t.put("function", fn);
@@ -496,6 +550,25 @@ public class AgentActor extends IIActorRef<Object> {
             }
             return FileWriteTool.write(java.nio.file.Path.of("").toAbsolutePath(), path, content);
         }
+        if ("search_tools".equals(tool)) {
+            return workflowIndex.search(input, WorkflowIndex.DEFAULT_MAX_RESULTS);
+        }
+        if ("run_workflow".equals(tool)) {
+            // Needs two fields (workflow + params JSON), so parse raw args.
+            String workflowName = "";
+            Map<String, String> workflowParams = new LinkedHashMap<>();
+            try {
+                JsonNode root = mapper.readTree(rawArgs == null ? "{}" : rawArgs);
+                workflowName = root.path("workflow").asText("");
+                String paramsJson = root.path("params").asText("{}");
+                JsonNode paramsNode = mapper.readTree(paramsJson.isBlank() ? "{}" : paramsJson);
+                paramsNode.fields().forEachRemaining(e ->
+                        workflowParams.put(e.getKey(), e.getValue().asText("")));
+            } catch (Exception e) {
+                return "error: could not parse run_workflow arguments: " + e.getMessage();
+            }
+            return dispatcher.runExternal(workflowName, workflowParams);
+        }
         if ("run_known_task".equals(tool)) {
             // Dispatch a known job to a Turing Workflow. Needs two fields (task + path), so parse the
             // raw tool arguments rather than the single extracted input.
@@ -523,8 +596,9 @@ public class AgentActor extends IIActorRef<Object> {
     private String extractInput(String tool, String argumentsJson) {
         String preferred = switch (tool) {
             case "calc" -> "expression";
-            case "web_search", "search_docs" -> "query";
+            case "web_search", "search_docs", "search_tools" -> "query";
             case "fetch" -> "url";
+            case "run_workflow" -> "workflow";
             default -> "path";   // read, and any single-path tool
         };
         try {

@@ -82,6 +82,24 @@
       <artifactId>plugin-llm</artifactId>
       <version>1.5.0</version>
     </dependency>
+    <!-- search_tools: Lucene in-memory full-text index over ~/works/workflow/*.yaml.
+         Three modules: core (Directory/IndexWriter/Searcher), analysis-common (StandardAnalyzer),
+         queryparser (MultiFieldQueryParser). No Hibernate Search dependency required. -->
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-core</artifactId>
+      <version>9.11.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-analysis-common</artifactId>
+      <version>9.11.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-queryparser</artifactId>
+      <version>9.11.0</version>
+    </dependency>
     <!-- web_search tool: DuckDuckGo HTML scraping (same approach as the mcp-gateway / plugin-web tools).
          Only jsoup is needed; the search logic is a small confined helper, not the shaded plugin jar. -->
     <dependency>

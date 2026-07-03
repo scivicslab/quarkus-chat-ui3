@@ -67,6 +67,9 @@ public class AgentLoopRunner {
     @Inject
     WorkflowDispatcher dispatcher;
 
+    @Inject
+    WorkflowIndex workflowIndex;
+
     // Effective context-window limit (tokens) for budgeting requests (s_budget). Default conservative;
     // set to the model's real --max-model-len (e.g. 131072 for gemma-4) to trim only near the limit.
     @ConfigProperty(name = "chatui3.context-window", defaultValue = "32768")
@@ -195,7 +198,7 @@ public class AgentLoopRunner {
             // The agent actor drives the ReAct loop (think -> act -> observe). Its close() cancels
             // any in-flight LLM call on teardown; cancelCurrent() cancels it on user request.
             AgentActor agent = new AgentActor("agent", vllmClient, config, sseRef, conversation, system,
-                    ioLog, sessionId, contextWindow, mapper, source, dispatcher);
+                    ioLog, sessionId, contextWindow, mapper, source, dispatcher, workflowIndex);
             system.addIIActor(agent);
             this.currentAgent = agent;   // expose for cancelCurrent()
 
