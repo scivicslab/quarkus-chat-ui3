@@ -16,6 +16,8 @@ import org.json.JSONObject;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -164,10 +166,16 @@ public class TuringWorkflowRunner {
                         .toString());
             }
 
-            ActionResult result = interp.runUntilEnd(maxIterations);
-            if (!result.isSuccess()) {
-                state.addLine("[error] workflow did not complete: " + result.getResult());
-                state.error = "workflow did not complete";
+            PrintStream prevOut = System.out;
+            System.setOut(new TeePrintStream(prevOut, state));
+            try {
+                ActionResult result = interp.runUntilEnd(maxIterations);
+                if (!result.isSuccess()) {
+                    state.addLine("[error] workflow did not complete: " + result.getResult());
+                    state.error = "workflow did not complete";
+                }
+            } finally {
+                System.setOut(prevOut);
             }
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "Turing workflow run failed: " + name, e);
@@ -234,6 +242,45 @@ public class TuringWorkflowRunner {
         volatile Interpreter interpreter = null;
 
         synchronized void addLine(String line) { pendingLines.add(line); }
+    }
+
+    /**
+     * Tees System.out to both the original stream and the run's line buffer.
+     * All output ultimately passes through write(byte[],int,int), so overriding
+     * that one method plus write(int) is sufficient.
+     */
+    private static final class TeePrintStream extends PrintStream {
+        private final RunState state;
+        private final StringBuilder lineBuf = new StringBuilder();
+
+        TeePrintStream(PrintStream delegate, RunState state) {
+            super(delegate, true, StandardCharsets.UTF_8);
+            this.state = state;
+        }
+
+        @Override
+        public void write(byte[] buf, int off, int len) {
+            super.write(buf, off, len);
+            String chunk = new String(buf, off, len, StandardCharsets.UTF_8);
+            String[] parts = chunk.split("\n", -1);
+            for (int i = 0; i < parts.length - 1; i++) {
+                lineBuf.append(parts[i]);
+                state.addLine(lineBuf.toString());
+                lineBuf.setLength(0);
+            }
+            lineBuf.append(parts[parts.length - 1]);
+        }
+
+        @Override
+        public void write(int b) {
+            super.write(b);
+            if (b == '\n') {
+                state.addLine(lineBuf.toString());
+                lineBuf.setLength(0);
+            } else {
+                lineBuf.append((char) b);
+            }
+        }
     }
 
     private static final class LineCollectingAccumulator implements Accumulator {
