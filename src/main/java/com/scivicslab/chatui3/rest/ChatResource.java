@@ -9,6 +9,7 @@ import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
 import com.scivicslab.chatui3.iolog.IoLogView;
 import com.scivicslab.chatui3.logging.LogTap;
+import com.scivicslab.chatui3.turingwf.TuringWorkflowRunner;
 import com.scivicslab.turingworkflow.plugins.logdb.DistributedLogStore;
 import com.scivicslab.turingworkflow.plugins.logdb.SessionSummary;
 import io.smallrye.mutiny.Multi;
@@ -55,6 +56,9 @@ public class ChatResource {
 
     @Inject
     WorkflowCatalog workflowCatalog;
+
+    @Inject
+    TuringWorkflowRunner turingWorkflowRunner;
 
     // ── SSE stream ────────────────────────────────────────────────────────────
 
@@ -313,6 +317,56 @@ public class ChatResource {
     @Produces(MediaType.APPLICATION_JSON)
     public List<IoLogView.TraceTurn> sessionTrace(@PathParam("id") long id) {
         return ioLogView.trace(id);
+    }
+
+    // ── Turing Workflow tab (external user-invocable workflows) ──────────────
+
+    /** Lists all .yaml files in the configured workflow directory. */
+    @GET
+    @Path("/turingwf")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response turingWfList() {
+        return Response.ok(Map.of("workflows", turingWorkflowRunner.listWorkflows())).build();
+    }
+
+    /** Returns a workflow's name, description, declared params, and raw YAML. */
+    @GET
+    @Path("/turingwf/spec/{name}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response turingWfSpec(@PathParam("name") String name) {
+        TuringWorkflowRunner.WorkflowSpec spec = turingWorkflowRunner.getWorkflow(name);
+        if (spec == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "workflow not found: " + name)).build();
+        }
+        return Response.ok(spec).build();
+    }
+
+    /** Starts a workflow run asynchronously. Returns a runId for polling. */
+    @POST
+    @Path("/turingwf/run/{name}")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response turingWfRun(@PathParam("name") String name, Map<String, String> params) {
+        if (turingWorkflowRunner.getWorkflow(name) == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "workflow not found: " + name)).build();
+        }
+        String runId = turingWorkflowRunner.startRun(name, params != null ? params : Map.of());
+        return Response.ok(Map.of("runId", runId)).build();
+    }
+
+    /** Polls for new output lines since the last call, plus done/error flags. */
+    @GET
+    @Path("/turingwf/status/{runId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response turingWfStatus(@PathParam("runId") String runId) {
+        TuringWorkflowRunner.RunStatus status = turingWorkflowRunner.pollStatus(runId);
+        if (status == null) {
+            return Response.status(Response.Status.NOT_FOUND)
+                    .entity(Map.of("error", "unknown runId: " + runId)).build();
+        }
+        return Response.ok(status).build();
     }
 
     private Map<String, Object> sessionToMap(SessionSummary s) {

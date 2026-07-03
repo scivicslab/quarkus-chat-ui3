@@ -100,7 +100,8 @@
                 <button class="rtab-btn active" data-tab="logdb">Sessions</button>
                 <button class="rtab-btn" data-tab="actors">Actors</button>
                 <button class="rtab-btn" data-tab="syslog">System Log</button>
-                <button class="rtab-btn" data-tab="workflow">Workflow</button>
+                <button class="rtab-btn" data-tab="agentloop">Agent Loop</button>
+                <button class="rtab-btn" data-tab="turingwf">Workflow</button>
                 <!-- Add new feature tabs here. -->
             </div>
 
@@ -147,7 +148,7 @@
                     <div id="logs-list"></div>
                 </section>
 
-                <section id="tab-workflow" class="rtab-content">
+                <section id="tab-agentloop" class="rtab-content">
                     <div class="tab-toolbar">
                         <label class="tab-auto">Workflow:
                             <select id="wf-select"></select>
@@ -156,6 +157,30 @@
                         <span id="wf-status"></span>
                     </div>
                     <div id="wf-list"></div>
+                </section>
+
+                <section id="tab-turingwf" class="rtab-content">
+                    <div class="tab-toolbar">
+                        <label class="tab-auto">Workflow:
+                            <select id="twf-select"></select>
+                        </label>
+                        <button id="twf-refresh" type="button">Refresh</button>
+                        <span id="twf-status"></span>
+                    </div>
+                    <div id="twf-body">
+                        <div id="twf-form-wrap" style="display:none">
+                            <div id="twf-form"></div>
+                            <div id="twf-run-bar">
+                                <button id="twf-run" type="button">Run</button>
+                                <button id="twf-cancel-run" type="button" disabled>Stop</button>
+                            </div>
+                        </div>
+                        <pre id="twf-output"></pre>
+                        <details id="twf-yaml-detail">
+                            <summary>YAML</summary>
+                            <div id="twf-wf-list"></div>
+                        </details>
+                    </div>
                 </section>
             </div>
         </div>

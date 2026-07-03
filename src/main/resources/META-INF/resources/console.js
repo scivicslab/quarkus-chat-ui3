@@ -61,7 +61,8 @@
             if (tab === 'actors') refreshActors();
             if (tab === 'logdb') ioOnShow();
             if (tab === 'syslog') refreshLogs();
-            if (tab === 'workflow') wfOnShow();
+            if (tab === 'agentloop') wfOnShow();
+            if (tab === 'turingwf') twfOnShow();
         });
     }
 
@@ -761,6 +762,189 @@
         if (md) md.addEventListener('change', function () { cfgPatch('modelId', md.value); });
     }
 
+    // ── Turing Workflow tab ──────────────────────────────────────────────────
+    var twfCurrentSpec = null;
+    var twfRunId = null;
+    var twfPollTimer = null;
+
+    function twfOnShow() {
+        if (!document.getElementById('twf-select').options.length ||
+                document.getElementById('twf-select').options[0].value === '') {
+            twfLoadList();
+        }
+    }
+
+    function twfSetStatus(msg) {
+        var s = document.getElementById('twf-status');
+        if (s) s.textContent = msg;
+    }
+
+    function twfLoadList() {
+        twfSetStatus('loading…');
+        fetch('/api/turingwf')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var sel = document.getElementById('twf-select');
+                sel.textContent = '';
+                var blank = document.createElement('option');
+                blank.value = ''; blank.textContent = '— select workflow —';
+                sel.appendChild(blank);
+                (d.workflows || []).forEach(function(name) {
+                    var opt = document.createElement('option');
+                    opt.value = name; opt.textContent = name;
+                    sel.appendChild(opt);
+                });
+                twfSetStatus('');
+            })
+            .catch(function(e) { twfSetStatus('error: ' + e.message); });
+    }
+
+    function twfLoadWorkflow(name) {
+        if (!name) {
+            twfCurrentSpec = null;
+            document.getElementById('twf-form-wrap').style.display = 'none';
+            document.getElementById('twf-output').classList.remove('visible');
+            document.getElementById('twf-wf-list').textContent = '';
+            return;
+        }
+        twfSetStatus('loading…');
+        fetch('/api/turingwf/spec/' + encodeURIComponent(name))
+            .then(function(r) { return r.json(); })
+            .then(function(spec) {
+                twfCurrentSpec = spec;
+                twfRenderForm(spec.params || []);
+                twfRenderYaml(spec.yaml || '');
+                document.getElementById('twf-form-wrap').style.display = '';
+                twfSetStatus('');
+            })
+            .catch(function(e) { twfSetStatus('error: ' + e.message); });
+    }
+
+    function twfRenderForm(params) {
+        var form = document.getElementById('twf-form');
+        form.textContent = '';
+        params.forEach(function(p) {
+            var field = document.createElement('div');
+            field.className = 'twf-field';
+
+            var label = document.createElement('label');
+            label.className = 'twf-label' + (p.required ? ' required' : '');
+            label.textContent = p.name;
+            if (p.description) label.title = p.description;
+            field.appendChild(label);
+
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.setAttribute('data-param', p.name);
+            if (p.defaultValue != null) input.value = p.defaultValue;
+            if (p.description) input.placeholder = p.description;
+            field.appendChild(input);
+
+            form.appendChild(field);
+        });
+    }
+
+    function twfCollectParams() {
+        var result = {};
+        var inputs = document.querySelectorAll('#twf-form [data-param]');
+        for (var i = 0; i < inputs.length; i++) {
+            var inp = inputs[i];
+            var name = inp.getAttribute('data-param');
+            var val = inp.value.trim();
+            var spec = null;
+            if (twfCurrentSpec && twfCurrentSpec.params) {
+                for (var k = 0; k < twfCurrentSpec.params.length; k++) {
+                    if (twfCurrentSpec.params[k].name === name) { spec = twfCurrentSpec.params[k]; break; }
+                }
+            }
+            if (!val && spec && spec.required) {
+                twfSetStatus('required: ' + name);
+                return null;
+            }
+            if (val) result[name] = val;
+        }
+        return result;
+    }
+
+    function twfRenderYaml(yaml) {
+        var list = document.getElementById('twf-wf-list');
+        list.textContent = '';
+        var title = twfCurrentSpec ? twfCurrentSpec.name : 'workflow';
+        wfRenderBox(list, title, yaml, 'head');
+    }
+
+    function twfRun() {
+        if (!twfCurrentSpec) { twfSetStatus('select a workflow first'); return; }
+        var params = twfCollectParams();
+        if (params === null) return;
+
+        var name = twfCurrentSpec.name;
+        twfSetStatus('starting…');
+        document.getElementById('twf-run').disabled = true;
+        document.getElementById('twf-cancel-run').disabled = false;
+
+        var out = document.getElementById('twf-output');
+        out.textContent = '';
+        out.classList.add('visible');
+
+        fetch('/api/turingwf/run/' + encodeURIComponent(name), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(params)
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.error) { twfSetStatus('error: ' + d.error); twfRunDone(); return; }
+            twfRunId = d.runId;
+            twfSetStatus('running…');
+            twfPollStatus();
+        })
+        .catch(function(e) { twfSetStatus('error: ' + e.message); twfRunDone(); });
+    }
+
+    function twfPollStatus() {
+        if (!twfRunId) return;
+        fetch('/api/turingwf/status/' + encodeURIComponent(twfRunId))
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var out = document.getElementById('twf-output');
+                (d.lines || []).forEach(function(line) {
+                    out.textContent += line + '\n';
+                    out.scrollTop = out.scrollHeight;
+                });
+                if (d.done) {
+                    twfSetStatus(d.error ? 'error: ' + d.error : 'done');
+                    twfRunDone();
+                } else {
+                    twfPollTimer = setTimeout(twfPollStatus, 700);
+                }
+            })
+            .catch(function(e) {
+                twfSetStatus('poll error: ' + e.message);
+                twfPollTimer = setTimeout(twfPollStatus, 2000);
+            });
+    }
+
+    function twfRunDone() {
+        twfRunId = null;
+        if (twfPollTimer) { clearTimeout(twfPollTimer); twfPollTimer = null; }
+        document.getElementById('twf-run').disabled = false;
+        document.getElementById('twf-cancel-run').disabled = true;
+    }
+
+    function initTuringWf() {
+        document.getElementById('twf-select').addEventListener('change', function() {
+            twfLoadWorkflow(this.value);
+        });
+        document.getElementById('twf-refresh').addEventListener('click', twfLoadList);
+        document.getElementById('twf-run').addEventListener('click', twfRun);
+        document.getElementById('twf-cancel-run').addEventListener('click', function() {
+            if (twfPollTimer) { clearTimeout(twfPollTimer); twfPollTimer = null; }
+            twfSetStatus('stopped');
+            twfRunDone();
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         initSplitter();
         initTabs();
@@ -769,6 +953,7 @@
         initIo();
         initConfig();
         initWorkflow();
+        initTuringWf();
         ioOnShow();   // Sessions is the default active tab; load it on startup.
     });
 })();
