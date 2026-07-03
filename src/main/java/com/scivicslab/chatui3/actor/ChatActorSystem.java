@@ -10,9 +10,11 @@ import com.scivicslab.pojoactor.core.ActorSystem;
 import com.scivicslab.turingworkflow.plugins.logdb.DistributedLogStore;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.operators.multi.processors.UnicastProcessor;
+import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
@@ -61,6 +63,16 @@ public class ChatActorSystem {
     private ActorRef<SseBatchLogger> batchRef;
     private ScheduledExecutorService logScheduler;
 
+    /**
+     * Forces this bean to initialize at application startup (an {@code @ApplicationScoped} bean is
+     * otherwise created lazily on first use). This guarantees the vLLM endpoint is logged immediately
+     * in the System Log at boot — so the operator sees the effective configuration without having to
+     * send a first request.
+     */
+    void onStart(@Observes StartupEvent event) {
+        // Body intentionally empty: observing StartupEvent triggers @PostConstruct init() eagerly.
+    }
+
     @PostConstruct
     void init() {
         actorSystem = new ActorSystem("chatui3");
@@ -93,7 +105,18 @@ public class ChatActorSystem {
         // Guard against a launcher passing an empty or literal "null" value (e.g. AI-workspace expanding
         // an unset ${VLLM_ENDPOINT}, or a stale UI config): such a value would otherwise become a bogus
         // http://null:8000 URL and every request would ConnectException. Fall back to the default.
+        // Log the RAW injected value and the effective value so the System Log shows exactly what the
+        // launcher passed — including when a bad value triggered the fallback.
         String baseUrl = sanitizeBaseUrl(vllmBaseUrl);
+        if (!baseUrl.equals(vllmBaseUrl)) {
+            LOG.warning("chatui3.vllm-base-url injected as [" + vllmBaseUrl + "] is unusable"
+                    + " (blank/null); falling back to default [" + baseUrl + "]."
+                    + " Check the launcher: AI-workspace passes -Dchatui3.vllm-base-url from the"
+                    + " 'vLLM Endpoint' form field (param key 'servers'); an unset ${VLLM_ENDPOINT}"
+                    + " or a stale UI value produces this.");
+        } else {
+            LOG.info("chatui3.vllm-base-url = [" + baseUrl + "] (as injected)");
+        }
         ChatUiConfig config   = new ChatUiConfig(baseUrl, defaultModel.orElse(""), defaultTemperature, defaultMaxTokens);
         VllmClient vllmClient = new VllmClient(objectMapper, batchRef, ioLog);
 

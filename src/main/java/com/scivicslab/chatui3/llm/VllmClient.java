@@ -135,7 +135,7 @@ public class VllmClient {
         String currentUser = messages.isEmpty() ? ""
                 : String.valueOf(messages.get(messages.size() - 1).get("content"));
         String userPreview = currentUser.length() > 200 ? currentUser.substring(0, 200) + "…" : currentUser;
-        LOG.info("vLLM request: " + messages.size() + " messages"
+        LOG.info("vLLM request -> " + url + " : " + messages.size() + " messages"
                 + (hasSystem ? " (system+history)" : "")
                 + ", " + requestBody.length() + " chars, user=" + userPreview);
         LOG.fine("vLLM request JSON (full): " + requestBody);
@@ -182,12 +182,12 @@ public class VllmClient {
                 }
             }
         } catch (RuntimeException e) {
-            LOG.log(Level.WARNING, "vLLM request failed: " + e.getMessage(), e);
+            LOG.log(Level.WARNING, "vLLM request to " + url + " failed: " + describe(e), e);
             throw e;
         } catch (Exception e) {
             // A cancel() that closes activeStream surfaces here as an IOException; treat uniformly.
-            LOG.log(Level.WARNING, "vLLM request failed: " + e.getMessage(), e);
-            throw new RuntimeException("vLLM request failed: " + e.getMessage(), e);
+            LOG.log(Level.WARNING, "vLLM request to " + url + " failed: " + describe(e), e);
+            throw new RuntimeException("vLLM request to " + url + " failed: " + describe(e), e);
         } finally {
             this.activeStream = null;
             if (batchRef != null) {
@@ -276,8 +276,8 @@ public class VllmClient {
             LOG.info("vLLM models response JSON: " + response.body());
             return ids;
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "vLLM listModels failed from " + url + ": " + e.getMessage(), e);
-            throw new RuntimeException("Failed to list models from " + vllmBaseUrl + ": " + e.getMessage(), e);
+            LOG.log(Level.WARNING, "vLLM listModels from " + url + " failed: " + describe(e), e);
+            throw new RuntimeException("Failed to list models from " + url + ": " + describe(e), e);
         }
     }
 
@@ -292,6 +292,22 @@ public class VllmClient {
      *   <li>No port   → append {@code :8000} (standard vLLM port)</li>
      * </ul>
      */
+    /**
+     * Builds a human-readable description of an exception whose {@code getMessage()} is often null
+     * (e.g. {@link java.net.ConnectException}), so the log names the failure instead of printing "null".
+     */
+    static String describe(Throwable t) {
+        StringBuilder sb = new StringBuilder(t.getClass().getSimpleName());
+        if (t.getMessage() != null) sb.append(": ").append(t.getMessage());
+        Throwable cause = t.getCause();
+        if (cause != null && cause != t) {
+            sb.append(" (cause: ").append(cause.getClass().getSimpleName());
+            if (cause.getMessage() != null) sb.append(": ").append(cause.getMessage());
+            sb.append(")");
+        }
+        return sb.toString();
+    }
+
     static String normalizeBaseUrl(String base) {
         if (base == null || base.isBlank()) return base;
         // Never fabricate a URL from an unusable value: the literal "null" (produced by launchers

@@ -143,6 +143,14 @@ public class ChatResource {
         if (patch == null || patch.isEmpty()) {
             return Response.status(400).entity("patch body required").build();
         }
+        // Log the incoming patch so any runtime config change is visible in the System Log — in
+        // particular a client sending vllmBaseUrl (which the UI never does) is worth surfacing.
+        if (patch.containsKey("vllmBaseUrl")) {
+            LOG.warning("POST /api/config received vllmBaseUrl=[" + patch.get("vllmBaseUrl")
+                    + "] (full patch keys=" + patch.keySet() + ")");
+        } else {
+            LOG.info("POST /api/config patch keys=" + patch.keySet());
+        }
         system.getChatActorRef().tell(a -> a.applyConfigPatch(patch));
         return Response.ok().build();
     }
