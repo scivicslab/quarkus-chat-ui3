@@ -281,30 +281,7 @@
         }
     });
 
-    // --- Editable title ---
-    var appTitle = document.getElementById('app-title');
-    var defaultTitle = appTitle.textContent;
-    var savedTitle = localStorage.getItem('chat-ui-custom-title');
-    if (savedTitle) {
-        appTitle.textContent = savedTitle;
-        document.title = savedTitle;
-    }
-    appTitle.addEventListener('input', function () {
-        document.title = appTitle.textContent || defaultTitle;
-    });
-    appTitle.addEventListener('blur', function () {
-        var t = appTitle.textContent.trim();
-        if (t && t !== defaultTitle) {
-            localStorage.setItem('chat-ui-custom-title', t);
-        } else {
-            localStorage.removeItem('chat-ui-custom-title');
-            appTitle.textContent = defaultTitle;
-        }
-        document.title = appTitle.textContent;
-    });
-    appTitle.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); appTitle.blur(); }
-    });
+    document.title = 'Chat UI3';
 
     // --- Model key (per-session in k8s-pups, global in standalone) ---
     var MODEL_KEY = 'chat-ui-model' + SESSION_SUFFIX;
