@@ -294,14 +294,21 @@ public class VllmClient {
      */
     static String normalizeBaseUrl(String base) {
         if (base == null || base.isBlank()) return base;
+        // Never fabricate a URL from an unusable value: the literal "null" (produced by launchers
+        // expanding an unset env var, or a stale UI config) must NOT become http://null:8000.
+        if (base.trim().equalsIgnoreCase("null")) return base;
         String withScheme = (base.startsWith("http://") || base.startsWith("https://"))
                 ? base : "http://" + base;
         try {
             java.net.URI uri = java.net.URI.create(withScheme);
+            String host = uri.getHost();
+            // Unusable host (missing or "null"): pass through so the caller fails with a clear URL,
+            // rather than a fabricated http://null:8000 that looks reachable.
+            if (host == null || host.isBlank() || host.equalsIgnoreCase("null")) return withScheme;
             if (uri.getPort() != -1) return withScheme;   // port already present
             // No port: reconstruct with :8000 between host and path.
             String path = uri.getRawPath() != null ? uri.getRawPath() : "";
-            return uri.getScheme() + "://" + uri.getHost() + ":8000" + path;
+            return uri.getScheme() + "://" + host + ":8000" + path;
         } catch (Exception e) {
             return withScheme;   // unparseable — pass through, let the caller fail clearly
         }

@@ -33,7 +33,10 @@ public class ChatActorSystem {
 
     private static final Logger LOG = Logger.getLogger(ChatActorSystem.class.getName());
 
-    @ConfigProperty(name = "chatui3.vllm-base-url")
+    /** Fallback when the injected vLLM base URL is missing or unusable (blank / literal "null"). */
+    static final String DEFAULT_VLLM_BASE_URL = "http://192.0.2.10:8000";
+
+    @ConfigProperty(name = "chatui3.vllm-base-url", defaultValue = DEFAULT_VLLM_BASE_URL)
     String vllmBaseUrl;
 
     @ConfigProperty(name = "chatui3.model")
@@ -87,7 +90,11 @@ public class ChatActorSystem {
         });
         logScheduler.scheduleAtFixedRate(() -> batchRef.tell(SseBatchLogger::tick), 5, 5, TimeUnit.SECONDS);
 
-        ChatUiConfig config   = new ChatUiConfig(vllmBaseUrl, defaultModel.orElse(""), defaultTemperature, defaultMaxTokens);
+        // Guard against a launcher passing an empty or literal "null" value (e.g. AI-workspace expanding
+        // an unset ${VLLM_ENDPOINT}, or a stale UI config): such a value would otherwise become a bogus
+        // http://null:8000 URL and every request would ConnectException. Fall back to the default.
+        String baseUrl = sanitizeBaseUrl(vllmBaseUrl);
+        ChatUiConfig config   = new ChatUiConfig(baseUrl, defaultModel.orElse(""), defaultTemperature, defaultMaxTokens);
         VllmClient vllmClient = new VllmClient(objectMapper, batchRef, ioLog);
 
         SseActor sseActor = new SseActor(objectMapper);
@@ -98,7 +105,19 @@ public class ChatActorSystem {
         chatActorRef.tell(a -> a.setSseRef(sseActorRef));
         chatActorRef.tell(a -> a.setSelfRef(chatActorRef));
 
-        LOG.info("ChatActorSystem initialized (vllm=" + vllmBaseUrl + ")");
+        LOG.info("ChatActorSystem initialized (vllm=" + baseUrl + ")");
+    }
+
+    /**
+     * Returns a usable vLLM base URL: the configured value when present, otherwise
+     * {@link #DEFAULT_VLLM_BASE_URL}. A blank value or the literal string {@code "null"}
+     * (which launchers produce from an unset env var or a stale UI config) is treated as unset.
+     */
+    static String sanitizeBaseUrl(String value) {
+        if (value == null) return DEFAULT_VLLM_BASE_URL;
+        String v = value.trim();
+        if (v.isEmpty() || v.equalsIgnoreCase("null")) return DEFAULT_VLLM_BASE_URL;
+        return v;
     }
 
     @PreDestroy

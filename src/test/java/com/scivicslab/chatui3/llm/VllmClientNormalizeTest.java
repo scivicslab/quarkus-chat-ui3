@@ -50,4 +50,12 @@ class VllmClientNormalizeTest {
         assertEquals("http://192.0.2.10:9000",
                 VllmClient.normalizeBaseUrl("http://192.0.2.10:9000"));
     }
+
+    @Test void literal_null_is_not_fabricated_into_a_host() {
+        // Regression: a literal "null" value must never become http://null:8000.
+        String out = VllmClient.normalizeBaseUrl("null");
+        org.junit.jupiter.api.Assertions.assertFalse(
+                out != null && out.contains("//null:8000"),
+                "normalizeBaseUrl fabricated a bogus host from \"null\": " + out);
+    }
 }
