@@ -884,6 +884,7 @@
 
         var name = twfCurrentSpec.name;
         var maxIter = parseInt(document.getElementById('twf-max-iter').value, 10) || 1000000;
+        var intervalMs = Math.round((parseFloat(document.getElementById('twf-interval').value) || 0) * 1000);
         twfSetStatus('starting…');
         document.getElementById('twf-run').disabled = true;
         document.getElementById('twf-cancel-run').disabled = false;
@@ -892,7 +893,7 @@
         out.textContent = '';
         out.classList.add('visible');
 
-        fetch('/api/turingwf/run/' + encodeURIComponent(name) + '?maxIterations=' + maxIter, {
+        fetch('/api/turingwf/run/' + encodeURIComponent(name) + '?maxIterations=' + maxIter + '&intervalMs=' + intervalMs, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)

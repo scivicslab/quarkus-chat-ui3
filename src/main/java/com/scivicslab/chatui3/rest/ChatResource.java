@@ -350,12 +350,14 @@ public class ChatResource {
     public Response turingWfRun(
             @PathParam("name") String name,
             @QueryParam("maxIterations") @DefaultValue("1000000") int maxIterations,
+            @QueryParam("intervalMs") @DefaultValue("0") long intervalMs,
             Map<String, String> params) {
         if (turingWorkflowRunner.getWorkflow(name) == null) {
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "workflow not found: " + name)).build();
         }
-        String runId = turingWorkflowRunner.startRun(name, params != null ? params : Map.of(), maxIterations);
+        String runId = turingWorkflowRunner.startRun(
+                name, params != null ? params : Map.of(), maxIterations, intervalMs);
         return Response.ok(Map.of("runId", runId)).build();
     }
 

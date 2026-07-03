@@ -4,7 +4,7 @@ import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.accumulator.Accumulator;
 import com.scivicslab.turingworkflow.workflow.DynamicActorLoaderIIAR;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
-import com.scivicslab.turingworkflow.workflow.Interpreter; // stored in RunState for requestStop()
+import com.scivicslab.turingworkflow.workflow.Interpreter;
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
 import com.scivicslab.turingworkflow.workflow.VarsActor;
 import com.scivicslab.turingworkflow.workflow.accumulator.ConsoleAccumulator;
@@ -33,8 +33,11 @@ import java.util.stream.Collectors;
 
 /**
  * Lists, parses, and runs external Turing Workflow YAML files from the user's workflow directory.
- * Execution uses the same embedded Turing engine as WorkflowDispatcher. Output is accumulated in
- * memory and served to the frontend via polling (POST /run → GET /status/{runId}).
+ * Output is accumulated in memory and served to the frontend via polling
+ * (POST /run → GET /status/{runId}).
+ *
+ * Execution is driven by SteppingInterpreter, a local Interpreter subclass that owns the
+ * runUntilEnd loop so it can inject a per-step sleep without patching the turing-workflow library.
  */
 @ApplicationScoped
 public class TuringWorkflowRunner {
@@ -101,11 +104,12 @@ public class TuringWorkflowRunner {
     }
 
     /** Starts a workflow run in a virtual thread. Returns a runId the caller polls with. */
-    public String startRun(String name, Map<String, String> inputParams, int maxIterations) {
+    public String startRun(String name, Map<String, String> inputParams, int maxIterations, long intervalMs) {
         String runId = UUID.randomUUID().toString();
         RunState state = new RunState();
         runs.put(runId, state);
-        Thread.ofVirtual().name("twf-" + name).start(() -> executeRun(name, inputParams, maxIterations, state));
+        Thread.ofVirtual().name("twf-" + name)
+                .start(() -> executeRun(name, inputParams, maxIterations, intervalMs, state));
         return runId;
     }
 
@@ -129,14 +133,12 @@ public class TuringWorkflowRunner {
         return new RunStatus(newLines, state.done, state.error);
     }
 
-    private void executeRun(String name, Map<String, String> inputParams, int maxIterations, RunState state) {
+    private void executeRun(String name, Map<String, String> inputParams,
+                            int maxIterations, long intervalMs, RunState state) {
         Path file = workflowDir().resolve(name + ".yaml");
         IIActorSystem system = new IIActorSystem("twf-" + name);
         try {
-            Interpreter interp = new Interpreter.Builder()
-                    .loggerName("twf")
-                    .team(system)
-                    .build();
+            SteppingInterpreter interp = new SteppingInterpreter("twf", system, intervalMs);
             interp.setWorkflowBaseDir(workflowDir().toString());
             state.interpreter = interp;
 
@@ -175,6 +177,45 @@ public class TuringWorkflowRunner {
             system.terminateIIActors();
             system.terminate();
             state.done = true;
+        }
+    }
+
+    // ── Interpreter subclass ─────────────────────────────────────────────────
+
+    /**
+     * Extends Interpreter to own the runUntilEnd loop, adding an optional per-step sleep.
+     * Accesses protected fields (currentState, stopRequested, logger, system) directly.
+     */
+    private static final class SteppingInterpreter extends Interpreter {
+
+        private final long stepDelayMs;
+
+        SteppingInterpreter(String loggerName, IIActorSystem sys, long stepDelayMs) {
+            this.logger = Logger.getLogger(loggerName);
+            this.system = sys;
+            this.stepDelayMs = stepDelayMs;
+        }
+
+        @Override
+        public ActionResult runUntilEnd(int maxIterations) {
+            if (!hasCodeLoaded()) return new ActionResult(false, "No code loaded");
+            for (int i = 0; i < maxIterations; i++) {
+                if (isStopRequested()) return new ActionResult(false, "Stopped by request");
+                if ("end".equals(currentState)) return new ActionResult(true, "Workflow completed");
+                ActionResult r = execCode();
+                if (!r.isSuccess()) {
+                    return new ActionResult(false, "Workflow failed at iteration " + i + ": " + r.getResult());
+                }
+                if (stepDelayMs > 0) {
+                    try {
+                        Thread.sleep(stepDelayMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return new ActionResult(false, "Interrupted during step delay");
+                    }
+                }
+            }
+            return new ActionResult(false, "Max iterations (" + maxIterations + ") exceeded");
         }
     }
 

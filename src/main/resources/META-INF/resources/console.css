@@ -502,24 +502,8 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
 }
 #twf-cancel-run:hover:not(:disabled) { border-color: var(--accent-red, #f87171); color: var(--accent-red, #f87171); }
 #twf-cancel-run:disabled { opacity: 0.3; cursor: not-allowed; }
-#twf-max-iter-label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--text-secondary, #b8b8b8);
-    margin-left: 8px;
-}
-#twf-max-iter {
-    width: 90px;
-    padding: 4px 6px;
-    font-size: 11px;
-    background: var(--bg-secondary, #1e1e1e);
-    color: var(--text-primary, #d4d4d4);
-    border: 1px solid var(--border-color, #444);
-    border-radius: 4px;
-    font-family: inherit;
-}
+#twf-max-iter { width: 80px; }
+#twf-interval { width: 56px; }
 #twf-output {
     margin: 0;
     background: var(--bg-primary, #141414);
