@@ -34,6 +34,12 @@ public class ChatEvent {
         return new ChatEvent("info", null, null, text);
     }
 
+    /** English rendering of a non-English prompt, shown as a green "EN:" badge for study only
+     *  (the ORIGINAL prompt is what the agent loop actually receives — this is display-only). */
+    public static ChatEvent translation(String english) {
+        return new ChatEvent("translation", null, null, english);
+    }
+
     /** A streamed fragment of the agent's reasoning, shown live in the per-turn "thinking" block
      *  (kept separate from the final answer's delta/result). */
     public static ChatEvent thinking(String fragment) {

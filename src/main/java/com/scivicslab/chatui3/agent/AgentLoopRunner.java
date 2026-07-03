@@ -70,6 +70,9 @@ public class AgentLoopRunner {
     @Inject
     WorkflowIndex workflowIndex;
 
+    @Inject
+    PromptTranslator promptTranslator;
+
     // Effective context-window limit (tokens) for budgeting requests (s_budget). Default conservative;
     // set to the model's real --max-model-len (e.g. 131072 for gemma-4) to trim only near the limit.
     @ConfigProperty(name = "chatui3.context-window", defaultValue = "32768")
@@ -152,6 +155,12 @@ public class AgentLoopRunner {
 
     private void run(String userMessage, String source) {
         ActorRef<SseActor> sseRef = chatSystem.getSseActorRef();
+        // Display-only English rendering of a non-English prompt (study aid): fire-and-forget on a
+        // virtual thread, emits a "translation" SSE badge when ready. The ORIGINAL prompt still drives
+        // the agent loop below. Only for the browser UI; API/workflow callers do not get the badge.
+        if ("browser".equals(source)) {
+            promptTranslator.translateAsync(userMessage, sseRef);
+        }
         ChatUiConfig config;
         try {
             config = chatSystem.getChatActorRef().ask(a -> a.getConfig()).get();
