@@ -281,11 +281,30 @@ public class VllmClient {
         }
     }
 
-    /** Prepends {@code http://} when the URL has no scheme, so bare hosts like {@code 192.0.2.10:8000} work. */
+    /**
+     * Normalizes a vLLM base URL so it always has a scheme and a port.
+     * Bare hosts entered in the UI (e.g. {@code 192.0.2.10}) would otherwise
+     * produce an {@code http://192.0.2.10} URI that connects to port 80 and
+     * immediately throws ConnectException.
+     *
+     * <ul>
+     *   <li>No scheme → prepend {@code http://}</li>
+     *   <li>No port   → append {@code :8000} (standard vLLM port)</li>
+     * </ul>
+     */
     static String normalizeBaseUrl(String base) {
         if (base == null || base.isBlank()) return base;
-        if (base.startsWith("http://") || base.startsWith("https://")) return base;
-        return "http://" + base;
+        String withScheme = (base.startsWith("http://") || base.startsWith("https://"))
+                ? base : "http://" + base;
+        try {
+            java.net.URI uri = java.net.URI.create(withScheme);
+            if (uri.getPort() != -1) return withScheme;   // port already present
+            // No port: reconstruct with :8000 between host and path.
+            String path = uri.getRawPath() != null ? uri.getRawPath() : "";
+            return uri.getScheme() + "://" + uri.getHost() + ":8000" + path;
+        } catch (Exception e) {
+            return withScheme;   // unparseable — pass through, let the caller fail clearly
+        }
     }
 
     // ── private ───────────────────────────────────────────────────────────────
