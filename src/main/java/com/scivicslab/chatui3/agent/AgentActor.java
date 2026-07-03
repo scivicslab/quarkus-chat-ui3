@@ -215,8 +215,26 @@ public class AgentActor extends IIActorRef<Object> {
                 return new ActionResult(true, "action");
             }
 
-            // No tool calls: the content is the final answer.
+            // No NATIVE tool calls. Fallback: some models (gemma-4 in multi-turn) emit the tool call as
+            // plain-text XML (<function_calls><invoke .../>) instead of via the tool_calls channel; the
+            // vLLM parser misses it, so without this the raw XML would be committed as the final answer.
             String text = resp != null ? resp.fullText() : "";
+            List<VllmResponse.ToolCall> textCalls = TextToolCallParser.parse(text);
+            if (!textCalls.isEmpty()) {
+                LOG.info("Recovered " + textCalls.size() + " text-emitted tool call(s) the model wrote as XML");
+                this.pendingCalls = textCalls;
+                // Keep history well-formed: record the prose (block stripped) plus native-format tool_calls,
+                // so the next request shows the model the correct shape rather than replaying the XML.
+                String prose = TextToolCallParser.stripToolCallBlocks(text);
+                this.scratchpad.add(assistantToolCallMessage(prose, textCalls));
+                for (VllmResponse.ToolCall tc : textCalls) {
+                    sseRef.tell(a -> a.emit(ChatEvent.thinking(
+                            "\n→ " + tc.name() + "(" + tc.arguments() + ")\n")));
+                }
+                return new ActionResult(true, "action");
+            }
+
+            // No tool calls at all: the content is the final answer.
             this.finalAnswer = text.trim();
             sseRef.tell(a -> a.emit(ChatEvent.thinkingDrop()));
             return new ActionResult(false, "final");
