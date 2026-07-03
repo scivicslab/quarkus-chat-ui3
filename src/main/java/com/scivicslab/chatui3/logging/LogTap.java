@@ -46,6 +46,21 @@ public class LogTap {
             } catch (Exception e) {
                 message = String.valueOf(record.getMessage());
             }
+            // Append thrown exception (class + message) so callers of LOG.log(level, "msg", ex)
+            // see the cause in the System Log tab — formatMessage() silently drops getThrown().
+            Throwable thrown = record.getThrown();
+            if (thrown != null) {
+                StringBuilder sb = new StringBuilder(message);
+                sb.append(" [").append(thrown.getClass().getSimpleName());
+                if (thrown.getMessage() != null) sb.append(": ").append(thrown.getMessage());
+                Throwable cause = thrown.getCause();
+                if (cause != null) {
+                    sb.append(" caused by ").append(cause.getClass().getSimpleName());
+                    if (cause.getMessage() != null) sb.append(": ").append(cause.getMessage());
+                }
+                sb.append("]");
+                message = sb.toString();
+            }
             Entry entry = new Entry(record.getMillis(), record.getLevel().getName(),
                     record.getLevel().intValue(), shortLogger, message);
             synchronized (buffer) {
