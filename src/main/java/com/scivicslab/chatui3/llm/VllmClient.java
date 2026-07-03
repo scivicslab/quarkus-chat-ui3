@@ -124,7 +124,7 @@ public class VllmClient {
             Consumer<String> onDelta,
             Consumer<VllmResponse> onComplete) {
 
-        String url = config.getVllmBaseUrl() + "/v1/chat/completions";
+        String url = normalizeBaseUrl(config.getVllmBaseUrl()) + "/v1/chat/completions";
         String requestBody = buildRequestBody(messages, config, stop, tools);
 
         // Compact request log: the full history can be large and is sent every turn, so by default
@@ -262,7 +262,7 @@ public class VllmClient {
      * Returns the model IDs available on the vLLM server.
      */
     public List<String> listModels(String vllmBaseUrl) {
-        String url = vllmBaseUrl + "/v1/models";
+        String url = normalizeBaseUrl(vllmBaseUrl) + "/v1/models";
         LOG.info("vLLM request: GET " + url);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -279,6 +279,13 @@ public class VllmClient {
             LOG.log(Level.WARNING, "vLLM listModels failed from " + url + ": " + e.getMessage(), e);
             throw new RuntimeException("Failed to list models from " + vllmBaseUrl + ": " + e.getMessage(), e);
         }
+    }
+
+    /** Prepends {@code http://} when the URL has no scheme, so bare hosts like {@code 192.0.2.10:8000} work. */
+    static String normalizeBaseUrl(String base) {
+        if (base == null || base.isBlank()) return base;
+        if (base.startsWith("http://") || base.startsWith("https://")) return base;
+        return "http://" + base;
     }
 
     // ── private ───────────────────────────────────────────────────────────────
