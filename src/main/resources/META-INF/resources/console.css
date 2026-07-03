@@ -520,6 +520,7 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     min-height: 54px;
     overflow: auto;
     resize: vertical;
+    flex-shrink: 0;  /* prevent flex from overriding user resize */
     display: none;
 }
 #twf-output.visible { display: block; }
