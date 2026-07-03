@@ -171,8 +171,7 @@ public class TuringWorkflowRunner {
             try {
                 ActionResult result = interp.runUntilEnd(maxIterations);
                 if (!result.isSuccess()) {
-                    state.addLine("[error] workflow did not complete: " + result.getResult());
-                    state.error = "workflow did not complete";
+                    state.error = result.getResult();
                 }
             } finally {
                 System.setOut(prevOut);
