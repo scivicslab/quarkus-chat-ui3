@@ -516,8 +516,8 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-primary, #d4d4d4);
-    height: 90px;   /* ≈ 5 lines at 12px/1.5lh */
-    min-height: 45px;
+    height: 120px;  /* 5 lines × 18px (12px/1.5lh) + padding */
+    min-height: 54px;
     overflow: auto;
     resize: vertical;
     display: none;
