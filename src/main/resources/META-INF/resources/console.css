@@ -520,21 +520,4 @@ body { margin: 0; height: 100vh; display: flex; flex-direction: column; overflow
     display: none;
 }
 #twf-output.visible { display: block; }
-#twf-yaml-detail {
-    border: 1px solid var(--border-color, #2f2f2f);
-    border-radius: 6px;
-    overflow: hidden;
-}
-#twf-yaml-detail > summary {
-    cursor: pointer;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--text-secondary, #9aa0a6);
-    background: var(--bg-tertiary, #1b1b1b);
-    user-select: none;
-    list-style: none;
-}
-#twf-yaml-detail > summary::-webkit-details-marker { display: none; }
-#twf-yaml-detail[open] > summary { border-bottom: 1px solid var(--border-color, #2f2f2f); }
-#twf-wf-list { padding: 8px; }
+#twf-wf-list { padding: 4px 0; }
