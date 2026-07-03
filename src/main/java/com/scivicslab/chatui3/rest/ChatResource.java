@@ -347,13 +347,25 @@ public class ChatResource {
     @Path("/turingwf/run/{name}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    public Response turingWfRun(@PathParam("name") String name, Map<String, String> params) {
+    public Response turingWfRun(
+            @PathParam("name") String name,
+            @QueryParam("maxIterations") @DefaultValue("1000000") int maxIterations,
+            Map<String, String> params) {
         if (turingWorkflowRunner.getWorkflow(name) == null) {
             return Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "workflow not found: " + name)).build();
         }
-        String runId = turingWorkflowRunner.startRun(name, params != null ? params : Map.of());
+        String runId = turingWorkflowRunner.startRun(name, params != null ? params : Map.of(), maxIterations);
         return Response.ok(Map.of("runId", runId)).build();
+    }
+
+    /** Requests a running workflow to stop. */
+    @POST
+    @Path("/turingwf/stop/{runId}")
+    @Produces(MediaType.APPLICATION_JSON)
+    public Response turingWfStop(@PathParam("runId") String runId) {
+        turingWorkflowRunner.stopRun(runId);
+        return Response.ok(Map.of("stopped", true)).build();
     }
 
     /** Polls for new output lines since the last call, plus done/error flags. */

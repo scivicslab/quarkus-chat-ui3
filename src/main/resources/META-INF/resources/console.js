@@ -883,6 +883,7 @@
         if (params === null) return;
 
         var name = twfCurrentSpec.name;
+        var maxIter = parseInt(document.getElementById('twf-max-iter').value, 10) || 1000000;
         twfSetStatus('starting…');
         document.getElementById('twf-run').disabled = true;
         document.getElementById('twf-cancel-run').disabled = false;
@@ -891,7 +892,7 @@
         out.textContent = '';
         out.classList.add('visible');
 
-        fetch('/api/turingwf/run/' + encodeURIComponent(name), {
+        fetch('/api/turingwf/run/' + encodeURIComponent(name) + '?maxIterations=' + maxIter, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(params)
@@ -944,6 +945,9 @@
         document.getElementById('twf-run').addEventListener('click', twfRun);
         document.getElementById('twf-cancel-run').addEventListener('click', function() {
             if (twfPollTimer) { clearTimeout(twfPollTimer); twfPollTimer = null; }
+            if (twfRunId) {
+                fetch('/api/turingwf/stop/' + encodeURIComponent(twfRunId), {method: 'POST'});
+            }
             twfSetStatus('stopped');
             twfRunDone();
         });

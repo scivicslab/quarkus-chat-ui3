@@ -4,7 +4,7 @@ import com.scivicslab.pojoactor.core.ActionResult;
 import com.scivicslab.pojoactor.core.accumulator.Accumulator;
 import com.scivicslab.turingworkflow.workflow.DynamicActorLoaderIIAR;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
-import com.scivicslab.turingworkflow.workflow.Interpreter;
+import com.scivicslab.turingworkflow.workflow.Interpreter; // stored in RunState for requestStop()
 import com.scivicslab.turingworkflow.workflow.InterpreterIIAR;
 import com.scivicslab.turingworkflow.workflow.VarsActor;
 import com.scivicslab.turingworkflow.workflow.accumulator.ConsoleAccumulator;
@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 public class TuringWorkflowRunner {
 
     private static final Logger LOG = Logger.getLogger(TuringWorkflowRunner.class.getName());
-    private static final int MAX_ITERATIONS = 1_000_000;
+    static final int DEFAULT_MAX_ITERATIONS = 1_000_000;
 
     @ConfigProperty(name = "chatui3.workflow.dir", defaultValue = "${user.home}/works/workflow")
     String workflowDirRaw;
@@ -101,12 +101,20 @@ public class TuringWorkflowRunner {
     }
 
     /** Starts a workflow run in a virtual thread. Returns a runId the caller polls with. */
-    public String startRun(String name, Map<String, String> inputParams) {
+    public String startRun(String name, Map<String, String> inputParams, int maxIterations) {
         String runId = UUID.randomUUID().toString();
         RunState state = new RunState();
         runs.put(runId, state);
-        Thread.ofVirtual().name("twf-" + name).start(() -> executeRun(name, inputParams, state));
+        Thread.ofVirtual().name("twf-" + name).start(() -> executeRun(name, inputParams, maxIterations, state));
         return runId;
+    }
+
+    /** Requests a running workflow to stop gracefully. No-op if the runId is unknown or already done. */
+    public void stopRun(String runId) {
+        RunState state = runs.get(runId);
+        if (state != null && state.interpreter != null) {
+            state.interpreter.requestStop();
+        }
     }
 
     /** Returns new output lines since the last poll, plus done/error flags. Null if runId unknown. */
@@ -121,7 +129,7 @@ public class TuringWorkflowRunner {
         return new RunStatus(newLines, state.done, state.error);
     }
 
-    private void executeRun(String name, Map<String, String> inputParams, RunState state) {
+    private void executeRun(String name, Map<String, String> inputParams, int maxIterations, RunState state) {
         Path file = workflowDir().resolve(name + ".yaml");
         IIActorSystem system = new IIActorSystem("twf-" + name);
         try {
@@ -130,6 +138,7 @@ public class TuringWorkflowRunner {
                     .team(system)
                     .build();
             interp.setWorkflowBaseDir(workflowDir().toString());
+            state.interpreter = interp;
 
             system.addIIActor(new DynamicActorLoaderIIAR("loader", system));
 
@@ -153,7 +162,7 @@ public class TuringWorkflowRunner {
                         .toString());
             }
 
-            ActionResult result = interp.runUntilEnd(MAX_ITERATIONS);
+            ActionResult result = interp.runUntilEnd(maxIterations);
             if (!result.isSuccess()) {
                 state.addLine("[error] workflow did not complete: " + result.getResult());
                 state.error = "workflow did not complete";
@@ -181,6 +190,7 @@ public class TuringWorkflowRunner {
         final List<String> pendingLines = new ArrayList<>();
         volatile boolean done = false;
         volatile String error = null;
+        volatile Interpreter interpreter = null;
 
         synchronized void addLine(String line) { pendingLines.add(line); }
     }

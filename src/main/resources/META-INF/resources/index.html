@@ -7,7 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <!-- chat-ui stylesheet first (pristine), then the shell overrides/additions. -->
     <link rel="stylesheet" href="styles.css?v=31">
-    <link rel="stylesheet" href="console.css?v=26">
+    <link rel="stylesheet" href="console.css?v=27">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <!-- KaTeX: render LaTeX math in the left-pane chat (assistant answers). -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
@@ -173,6 +173,9 @@
                             <div id="twf-run-bar">
                                 <button id="twf-run" type="button">Run</button>
                                 <button id="twf-cancel-run" type="button" disabled>Stop</button>
+                                <label id="twf-max-iter-label">Max iterations
+                                    <input id="twf-max-iter" type="number" value="1000000" min="1" step="1000">
+                                </label>
                             </div>
                         </div>
                         <pre id="twf-output"></pre>
@@ -185,6 +188,6 @@
 
     <!-- chat-ui application script (unchanged), then the shell script. -->
     <script src="app.js?v=47"></script>
-    <script src="console.js?v=26"></script>
+    <script src="console.js?v=27"></script>
 </body>
 </html>
