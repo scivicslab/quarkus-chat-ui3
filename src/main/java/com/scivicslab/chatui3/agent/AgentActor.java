@@ -495,7 +495,9 @@ public class AgentActor extends IIActorRef<Object> {
     // ── helpers ────────────────────────────────────────────────────────────────
 
     private List<Map<String, Object>> buildMessages() {
-        Map<String, Object> system = message("system", SYSTEM_PROMPT);
+        // Prepend the current date/time so the model does not guess "today" (it has no clock and
+        // would otherwise fabricate dates in web_search queries — e.g. searching last week's weather).
+        Map<String, Object> system = message("system", currentDatePreamble() + SYSTEM_PROMPT);
         Map<String, Object> user = message("user", question);
         // Budget the cross-turn history (s_budget): keep system + current user + this turn's
         // scratchpad, and fit as many recent history pairs as the token budget allows. Trimming
@@ -513,6 +515,18 @@ public class AgentActor extends IIActorRef<Object> {
         messages.add(user);
         messages.addAll(scratchpad);
         return messages;
+    }
+
+    /**
+     * A one-line preamble stating the current local date and time, so the model answers time-relative
+     * questions ("this weekend", "today") against the real clock and builds correct web_search queries.
+     */
+    private static String currentDatePreamble() {
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now();
+        String date = now.format(java.time.format.DateTimeFormatter.ofPattern(
+                "EEEE, yyyy-MM-dd HH:mm z", java.util.Locale.ENGLISH));
+        return "The current date and time is " + date + ". Use this as \"now\" for any time-relative "
+             + "question (today, this weekend, tomorrow) and in date-specific search queries.\n\n";
     }
 
     private String runToolImpl(String tool, String input, String rawArgs) {
