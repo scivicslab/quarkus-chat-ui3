@@ -61,8 +61,11 @@ public class VllmClient {
         this.ioLog = ioLog;
         // Force HTTP/1.1: vLLM does not support HTTP/2; the default HttpClient
         // tries HTTP/2 negotiation which causes the request body to be dropped.
+        // connectTimeout bounds TCP connect so a wrong/unreachable host (e.g. an IP typo like
+        // 192.16.5.16) fails fast with a clear log instead of hanging the turn indefinitely.
         this.http = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(java.time.Duration.ofSeconds(10))
                 .build();
     }
 
@@ -296,7 +299,7 @@ public class VllmClient {
      * Builds a human-readable description of an exception whose {@code getMessage()} is often null
      * (e.g. {@link java.net.ConnectException}), so the log names the failure instead of printing "null".
      */
-    static String describe(Throwable t) {
+    public static String describe(Throwable t) {
         StringBuilder sb = new StringBuilder(t.getClass().getSimpleName());
         if (t.getMessage() != null) sb.append(": ").append(t.getMessage());
         Throwable cause = t.getCause();

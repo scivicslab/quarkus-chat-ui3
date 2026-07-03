@@ -170,7 +170,21 @@ public class AgentActor extends IIActorRef<Object> {
         this.finalAnswer = null;
         this.stepCount = 0;
         this.cancelled = false;
+        String qPreview = question == null ? "" :
+                (question.length() > 100 ? question.substring(0, 100) + "…" : question);
+        LOG.info("turn" + turnNo + ": START agent loop, source=" + source
+                + ", vllm=" + config.getVllmBaseUrl() + ", user=" + qPreview);
         return new ActionResult(true, "started");
+    }
+
+    /** Comma-joined tool names for a compact log line. */
+    private static String toolCallNames(List<VllmResponse.ToolCall> calls) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < calls.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(calls.get(i).name());
+        }
+        return sb.toString();
     }
 
     /**
@@ -180,15 +194,21 @@ public class AgentActor extends IIActorRef<Object> {
     @Action("stepExpectingAction")
     public ActionResult stepExpectingAction(String args) {
         if (cancelled) {
+            LOG.info("turn" + turnNo + ": step cancelled before start");
             return new ActionResult(false, "cancelled");
         }
         if (++stepCount > MAX_STEPS) {
+            LOG.warning("turn" + turnNo + ": step limit reached (MAX_STEPS=" + MAX_STEPS
+                    + "); ending turn without a model answer");
             this.finalAnswer = "(step limit reached)";
             return new ActionResult(false, "step limit");
         }
         this.worker = Thread.currentThread();
         try {
             List<Map<String, Object>> messages = buildMessages();
+            LOG.info("turn" + turnNo + "/step" + stepCount + ": calling LLM ("
+                    + messages.size() + " messages, " + scratchpad.size() + " scratchpad, "
+                    + TOOLS.size() + " tools offered)");
             final VllmResponse[] respHolder = {null};
             // Stream reasoning/content live to the browser's per-turn "thinking" block (kept separate
             // from the final answer). thinkingStep() marks this step's start so the UI can drop it if
@@ -205,6 +225,8 @@ public class AgentActor extends IIActorRef<Object> {
 
             if (resp != null && resp.hasToolCalls()) {
                 this.pendingCalls = resp.toolCalls();
+                LOG.info("turn" + turnNo + "/step" + stepCount + ": model returned "
+                        + pendingCalls.size() + " NATIVE tool call(s): " + toolCallNames(pendingCalls));
                 // Record the assistant's tool-call turn so the follow-up request is well-formed.
                 this.scratchpad.add(assistantToolCallMessage(resp.fullText(), pendingCalls));
                 // Show the calls in the live trace (content is usually empty on a tool-call step).
@@ -221,7 +243,9 @@ public class AgentActor extends IIActorRef<Object> {
             String text = resp != null ? resp.fullText() : "";
             List<VllmResponse.ToolCall> textCalls = TextToolCallParser.parse(text);
             if (!textCalls.isEmpty()) {
-                LOG.info("Recovered " + textCalls.size() + " text-emitted tool call(s) the model wrote as XML");
+                LOG.info("turn" + turnNo + "/step" + stepCount + ": no native tool_calls, but RECOVERED "
+                        + textCalls.size() + " text-emitted tool call(s) the model wrote as XML: "
+                        + toolCallNames(textCalls) + " (content " + text.length() + " chars)");
                 this.pendingCalls = textCalls;
                 // Keep history well-formed: record the prose (block stripped) plus native-format tool_calls,
                 // so the next request shows the model the correct shape rather than replaying the XML.
@@ -236,13 +260,17 @@ public class AgentActor extends IIActorRef<Object> {
 
             // No tool calls at all: the content is the final answer.
             this.finalAnswer = text.trim();
+            LOG.info("turn" + turnNo + "/step" + stepCount + ": model produced a FINAL answer ("
+                    + finalAnswer.length() + " chars); ending loop");
             sseRef.tell(a -> a.emit(ChatEvent.thinkingDrop()));
             return new ActionResult(false, "final");
         } catch (Exception e) {
             if (cancelled) {
+                LOG.info("turn" + turnNo + "/step" + stepCount + ": step interrupted by cancel");
                 return new ActionResult(false, "cancelled");
             }
-            LOG.log(Level.WARNING, "agent step failed", e);
+            LOG.log(Level.WARNING, "turn" + turnNo + "/step" + stepCount + ": agent step failed: "
+                    + VllmClient.describe(e), e);
             sseRef.tell(a -> a.emit(ChatEvent.error(e.getMessage())));
             this.finalAnswer = null;
             return new ActionResult(false, "error");
@@ -259,12 +287,22 @@ public class AgentActor extends IIActorRef<Object> {
         }
         for (VllmResponse.ToolCall tc : pendingCalls) {
             String toolInput = extractInput(tc.name(), tc.arguments());
+            String inputPreview = toolInput.length() > 120 ? toolInput.substring(0, 120) + "…" : toolInput;
+            LOG.info("turn" + turnNo + "/step" + stepCount + ": executing tool " + tc.name()
+                    + "(" + inputPreview + ")");
+            long t0 = System.nanoTime();
             String observation;
             try {
                 observation = runToolImpl(tc.name(), toolInput, tc.arguments());
             } catch (Exception e) {
                 observation = "error: " + e.getMessage();
+                LOG.log(Level.WARNING, "turn" + turnNo + "/step" + stepCount + ": tool " + tc.name()
+                        + " threw: " + VllmClient.describe(e), e);
             }
+            long ms = (System.nanoTime() - t0) / 1_000_000;
+            LOG.info("turn" + turnNo + "/step" + stepCount + ": tool " + tc.name() + " -> "
+                    + observation.length() + " chars in " + ms + "ms"
+                    + (observation.startsWith("error:") ? " [ERROR]" : ""));
             // Budget (s_budget): a huge observation (e.g. a file read) is truncated head+tail for the
             // copy the model sees; the FULL observation still goes to the I/O log.
             final String fullObs = observation;
@@ -286,8 +324,12 @@ public class AgentActor extends IIActorRef<Object> {
     @Action("finish")
     public ActionResult finish(String args) {
         if (cancelled || finalAnswer == null) {
+            LOG.info("turn" + turnNo + ": FINISH without committing (cancelled=" + cancelled
+                    + ", finalAnswer=" + (finalAnswer == null ? "null" : "present") + ")");
             return new ActionResult(true, "ended");   // cancelled / errored: end quietly
         }
+        LOG.info("turn" + turnNo + ": FINISH, committing answer (" + finalAnswer.length()
+                + " chars) after " + stepCount + " step(s)");
         String answer = finalAnswer;
         sseRef.tell(a -> a.emit(ChatEvent.delta(answer)));
         sseRef.tell(a -> a.emit(ChatEvent.result(answer)));
