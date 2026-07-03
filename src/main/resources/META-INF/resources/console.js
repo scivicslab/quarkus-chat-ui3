@@ -868,9 +868,13 @@
 
     function twfRenderYaml(yaml) {
         var list = document.getElementById('twf-wf-list');
+        if (!list) return;
         list.textContent = '';
-        var title = twfCurrentSpec ? twfCurrentSpec.name : 'workflow';
-        wfRenderBox(list, title, yaml, 'head');
+        var parts = wfSplitSteps(yaml);
+        if (parts.preamble) wfRenderBox(list, 'workflow header', parts.preamble, 'head');
+        parts.steps.forEach(function(s, i) {
+            wfRenderBox(list, wfStepTitle(s, i), s, 'step');
+        });
     }
 
     function twfRun() {
