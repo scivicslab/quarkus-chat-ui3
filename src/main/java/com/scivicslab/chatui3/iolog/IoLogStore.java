@@ -61,6 +61,16 @@ public class IoLogStore {
     private long sessionId = -1;
     private boolean failed = false;
 
+    // Dedicated connection to the SAME per-port DB file for the browser conversation state
+    // (system prompt + committed turns + the log session id to resume). IoLogStore owns ALL H2 access
+    // for this instance so conversation_state and the sessions/logs tables live in one file — otherwise
+    // a resumed session id would be foreign to this instance's log DB and every log write would fail the
+    // sessions foreign key. Opened lazily in ensureStore().
+    private Connection convDb;
+
+    /** The browser conversation's persisted state. {@code sessionId} is the log session to resume. */
+    public record ConversationState(long sessionId, String systemPrompt, String turnsJson) {}
+
     /**
      * The actor wrapping {@link #store}, created by ChatActorSystem as a child of root. When set,
      * {@link #record} dispatches writes through it (fire-and-forget tell) so every complete-I/O write
@@ -82,9 +92,85 @@ public class IoLogStore {
             });
             LOG.info("I/O log DB opened: " + Path.of(dbPathForPort()).toAbsolutePath() + ".mv.db"
                     + " (compress=" + compress + ")");
+            openConvDb();
         } catch (Exception e) {
             failed = true;
             LOG.log(Level.SEVERE, "Failed to open I/O log DB; complete logging disabled", e);
+        }
+    }
+
+    // ── Conversation state (owned here so it shares the ONE per-port DB file) ──────────────────
+
+    /** Opens the conversation_state connection on the same DB file and ensures its table exists. */
+    private void openConvDb() {
+        try {
+            String url = "jdbc:h2:" + Path.of(dbPathForPort()).toAbsolutePath() + ";AUTO_SERVER=TRUE"
+                    + (compress ? ";COMPRESS=TRUE" : "");
+            convDb = DriverManager.getConnection(url);
+            try (var st = convDb.createStatement()) {
+                st.execute("CREATE TABLE IF NOT EXISTS conversation_state ("
+                        + "conv_key VARCHAR(64) PRIMARY KEY, session_id BIGINT, "
+                        + "system_prompt CLOB, turns_json CLOB, updated_at TIMESTAMP)");
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "conversation_state persistence unavailable", e);
+            convDb = null;
+        }
+    }
+
+    /** Loads the persisted conversation state for {@code key}, or null if none/unavailable. */
+    public synchronized ConversationState loadConversationState(String key) {
+        ensureStore();
+        if (convDb == null) {
+            return null;
+        }
+        try (PreparedStatement ps = convDb.prepareStatement(
+                "SELECT session_id, system_prompt, turns_json FROM conversation_state WHERE conv_key=?")) {
+            ps.setString(1, key);
+            try (var rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                return new ConversationState(rs.getLong("session_id"),
+                        rs.getString("system_prompt"), rs.getString("turns_json"));
+            }
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to load conversation state", e);
+            return null;
+        }
+    }
+
+    /** Upserts the single conversation_state row for {@code key}. No-op if persistence is unavailable. */
+    public synchronized void saveConversationState(
+            String key, long sessionId, String systemPrompt, String turnsJson) {
+        ensureStore();
+        if (convDb == null) {
+            return;
+        }
+        try (PreparedStatement ps = convDb.prepareStatement(
+                "MERGE INTO conversation_state (conv_key, session_id, system_prompt, turns_json, updated_at) "
+                        + "VALUES (?,?,?,?,CURRENT_TIMESTAMP)")) {
+            ps.setString(1, key);
+            ps.setLong(2, sessionId);
+            ps.setString(3, systemPrompt);
+            ps.setString(4, turnsJson);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to persist conversation state", e);
+        }
+    }
+
+    /** Deletes the conversation_state row for {@code key} (memory reset). */
+    public synchronized void clearConversationState(String key) {
+        if (convDb == null) {
+            return;
+        }
+        try (PreparedStatement ps = convDb.prepareStatement(
+                "DELETE FROM conversation_state WHERE conv_key=?")) {
+            ps.setString(1, key);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Failed to clear persisted conversation", e);
         }
     }
 
@@ -308,6 +394,13 @@ public class IoLogStore {
         if (store != null) {
             try {
                 store.close();
+            } catch (Exception e) {
+                // shutting down; ignore
+            }
+        }
+        if (convDb != null) {
+            try {
+                convDb.close();
             } catch (Exception e) {
                 // shutting down; ignore
             }
