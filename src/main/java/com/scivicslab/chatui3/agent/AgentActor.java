@@ -81,12 +81,13 @@ public class AgentActor extends IIActorRef<Object> {
           + "    * Faithfully translating an entire document into Japanese\n"
           + "      -> run_known_task(task='translate_document', path=<document file>).\n"
           + "  The task result comes back as the observation; then present it as your final answer.\n"
-          + "- For other tasks (arXiv summarization, OCR, domain-specific processing), user-defined\n"
-          + "  workflows may be available. The two-step process:\n"
-          + "    1. FIRST call 'search_tools' with a descriptive query (e.g. 'arXiv PDF summarize')\n"
-          + "       to discover available workflows and learn their required parameters.\n"
-          + "    2. THEN call 'run_workflow' with the workflow name and a JSON params string.\n"
-          + "  Never guess a workflow name; always search first.\n"
+          + "- USER-DEFINED WORKFLOWS: for domain-specific tasks (e.g. searching OpenAlex for papers,\n"
+          + "  summarizing an arXiv paper, OCR), the workflows most relevant to THIS request are already\n"
+          + "  listed for you at the end of this message under 'Available workflows for this request'\n"
+          + "  (the harness pre-searched them from the user's message — you do NOT call any search tool).\n"
+          + "  If one of them fits the request, call 'run_workflow' with its EXACT name and a JSON params\n"
+          + "  string built from the params shown. Prefer a matching workflow over 'web_search': do NOT\n"
+          + "  web-search a task a listed workflow already performs. If none fit, ignore the list.\n"
           + "- DOC-FIRST GATE: before you BUILD ON, EXTEND, or IMPLEMENT WITH a framework, library, or\n"
           + "  system — especially before adding a new capability to one — FIRST call 'search_docs' for\n"
           + "  that framework's existing capabilities and conventions (use a specific concept word in the\n"
@@ -125,11 +126,17 @@ public class AgentActor extends IIActorRef<Object> {
     // deterministic Turing Workflow. Backs the 'run_known_task' tool.
     private final WorkflowDispatcher dispatcher;
 
-    // Lucene in-memory index over ~/works/workflow/*.yaml. Backs the 'search_tools' tool.
+    // Lucene in-memory index over ~/works/workflow/*.yaml. The HARNESS (not the model) searches it
+    // once per turn with the user's message and injects the top matches into the system prompt, so
+    // tool discovery is deterministic rather than depending on the model choosing to call a search tool.
     private final WorkflowIndex workflowIndex;
+    /** How many workflow matches the harness injects into the system prompt each turn. */
+    private static final int WORKFLOW_CATALOG_SIZE = 5;
 
     // per-turn working memory
     private String question;
+    // The top workflow matches for THIS turn's user message, formatted for the system prompt.
+    private String workflowCatalog = "";
     private int turnNo;   // conversation turn number, for labelling I/O log entries
     // The in-turn scratchpad in OpenAI message form: assistant tool-call messages and the
     // role:"tool" results we feed back, accumulated across steps.
@@ -170,11 +177,37 @@ public class AgentActor extends IIActorRef<Object> {
         this.finalAnswer = null;
         this.stepCount = 0;
         this.cancelled = false;
+        // Harness-side tool discovery: search the workflow index with the user's message NOW and inject
+        // the top matches into the system prompt. The model never has to decide to call a search tool.
+        this.workflowCatalog = buildWorkflowCatalog(question);
         String qPreview = question == null ? "" :
                 (question.length() > 100 ? question.substring(0, 100) + "…" : question);
         LOG.info("turn" + turnNo + ": START agent loop, source=" + source
-                + ", vllm=" + config.getVllmBaseUrl() + ", user=" + qPreview);
+                + ", vllm=" + config.getVllmBaseUrl() + ", user=" + qPreview
+                + ", workflowCatalog=" + (workflowCatalog.isEmpty() ? "empty" : workflowCatalog.length() + " chars"));
         return new ActionResult(true, "started");
+    }
+
+    /**
+     * Runs the workflow index against the user's message and formats the top matches as a system-prompt
+     * block. Returns "" when there is no index or no message, so buildMessages() can append unconditionally.
+     */
+    private String buildWorkflowCatalog(String userMessage) {
+        if (workflowIndex == null || userMessage == null || userMessage.isBlank()) {
+            return "";
+        }
+        try {
+            String hits = workflowIndex.search(userMessage, WORKFLOW_CATALOG_SIZE);
+            if (hits == null || hits.isBlank() || hits.startsWith("error:")
+                    || hits.startsWith("Workflow index is not available")) {
+                return "";
+            }
+            return "\n\n--- Available workflows for this request (pre-searched by the harness; "
+                 + "call run_workflow if one fits) ---\n" + hits;
+        } catch (Exception e) {
+            LOG.log(Level.FINE, "workflow catalog build failed", e);
+            return "";
+        }
     }
 
     /** Comma-joined tool names for a compact log line. */
@@ -400,13 +433,9 @@ public class AgentActor extends IIActorRef<Object> {
                + "'Turing Workflow サブワークフロー 呼び出し' or 'POJO-actor tell ask の使い方', not just generic terms."),
             writeTool(),
             knownTaskTool(),
-            tool("search_tools",
-                 "Search the user's available workflows by meaning and return their names, descriptions, "
-               + "and required parameters. ALWAYS call this before run_workflow — never guess a workflow "
-               + "name. Use it when the user asks for a task that might be handled by a workflow (e.g. "
-               + "arXiv summarization, PDF OCR, domain-specific processing).",
-                 "query",
-                 "Natural-language description of the task, e.g. 'arXiv PDF summarize' or 'OCR Japanese PDF'."),
+            // No 'search_tools' tool: the harness pre-searches the workflow index each turn and injects
+            // the matches into the system prompt (see buildWorkflowCatalog), so the model calls
+            // run_workflow directly without a model-driven discovery step.
             runWorkflowTool());
 
     /**
@@ -557,7 +586,10 @@ public class AgentActor extends IIActorRef<Object> {
     private List<Map<String, Object>> buildMessages() {
         // Prepend the current date/time so the model does not guess "today" (it has no clock and
         // would otherwise fabricate dates in web_search queries — e.g. searching last week's weather).
-        Map<String, Object> system = message("system", currentDatePreamble() + SYSTEM_PROMPT);
+        // Append the harness-pre-searched workflow catalog so the model can call run_workflow directly
+        // without a discovery round-trip.
+        Map<String, Object> system =
+                message("system", currentDatePreamble() + SYSTEM_PROMPT + workflowCatalog);
         Map<String, Object> user = message("user", question);
         // Budget the cross-turn history (s_budget): keep system + current user + this turn's
         // scratchpad, and fit as many recent history pairs as the token budget allows. Trimming
@@ -624,9 +656,6 @@ public class AgentActor extends IIActorRef<Object> {
             }
             return FileWriteTool.write(java.nio.file.Path.of("").toAbsolutePath(), path, content);
         }
-        if ("search_tools".equals(tool)) {
-            return workflowIndex.search(input, WorkflowIndex.DEFAULT_MAX_RESULTS);
-        }
         if ("run_workflow".equals(tool)) {
             // Needs two fields (workflow + params JSON), so parse raw args.
             String workflowName = "";
@@ -670,7 +699,7 @@ public class AgentActor extends IIActorRef<Object> {
     private String extractInput(String tool, String argumentsJson) {
         String preferred = switch (tool) {
             case "calc" -> "expression";
-            case "web_search", "search_docs", "search_tools" -> "query";
+            case "web_search", "search_docs" -> "query";
             case "fetch" -> "url";
             case "run_workflow" -> "workflow";
             default -> "path";   // read, and any single-path tool
