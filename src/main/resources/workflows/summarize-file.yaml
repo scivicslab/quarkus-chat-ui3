@@ -25,7 +25,7 @@ steps:
     actions:
       - actor: llm
         method: setOpenAiUrl
-        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+        arguments: ["http://vllm:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
       - actor: llm
         method: setSystemPrompt
         arguments: "You are a senior code analyst. You receive ONE source file, prefixed with its path on the first line (FILE: <path>). Write a concise summary in English (3-6 sentences). State: (1) the file's single responsibility, (2) its key classes/methods/types and what they do, (3) notable dependencies or how it connects to the rest of the project. Begin the summary with the file path in backticks. Do not quote the code back; describe it. Output only the summary."

@@ -12,7 +12,7 @@ params:
     description: "Directory of Markdown docs to describe (absolute path)"
   wf.dir:
     description: "Directory holding the sub-workflow (describe-doc.yaml)"
-    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+    default: "/path/to/workflows"
 
 steps:
   - states: ["0", "1"]

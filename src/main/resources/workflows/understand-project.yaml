@@ -23,7 +23,7 @@ params:
     description: "Output overview document (absolute path)"
   wf.dir:
     description: "Directory holding the sub-workflow (summarize-file.yaml)"
-    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+    default: "/path/to/workflows"
 
 steps:
   - states: ["0", "1"]
@@ -84,7 +84,7 @@ steps:
     actions:
       - actor: llm
         method: setOpenAiUrl
-        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+        arguments: ["http://vllm:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
       - actor: llm
         method: setSystemPrompt
         arguments: "You are a senior software engineer and technical writer. You are given per-file summaries of ONE software project (each begins with the file path in backticks). Synthesize them into a single cohesive project overview document in Markdown, in English. Cover: (1) what the program does (purpose), (2) the architecture — the major components/layers and how they fit together, (3) how to build and run it if that is evident from the files, (4) notable design points or extension mechanisms. Do not merely concatenate the summaries; integrate them and resolve overlaps. Use Markdown headings. Output only the document."

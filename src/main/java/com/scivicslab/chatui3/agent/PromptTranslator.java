@@ -60,8 +60,10 @@ public class PromptTranslator {
     @ConfigProperty(name = "chatui3.translate.enabled", defaultValue = "true")
     boolean enabled;
 
+    // Neutral placeholder default; the real vLLM endpoint is injected per deployment via the
+    // chatui3.translate.vllm-url property (env CHATUI3_TRANSLATE_VLLM_URL).
     @ConfigProperty(name = "chatui3.translate.vllm-url",
-            defaultValue = "http://192.0.2.10:8000/v1/chat/completions")
+            defaultValue = "http://vllm:8000/v1/chat/completions")
     String vllmUrl;
 
     @ConfigProperty(name = "chatui3.translate.model", defaultValue = "Qwen2.5-14B-Instruct-AWQ")

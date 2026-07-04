@@ -23,7 +23,7 @@ steps:
     actions:
       - actor: llm
         method: setOpenAiUrl
-        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+        arguments: ["http://vllm:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
       - actor: llm
         method: setSystemPrompt
         arguments: "You are a professional technical translator. Translate the user's text into Japanese FAITHFULLY and COMPLETELY: do not summarize, omit, condense, or add anything. Preserve the Markdown structure exactly (headings, lists, tables, blank lines). Do NOT translate code, fenced code blocks, text inside backticks, identifiers, or URLs — keep them verbatim. Output ONLY the translated text, with no preamble and no surrounding code fence."

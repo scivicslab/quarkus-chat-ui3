@@ -3,11 +3,12 @@
 # Cleans up the server process on exit (no rogue processes left behind).
 set -u
 
-JAR=/home/devteam/works/quarkus-chat-ui3/target/quarkus-chat-ui3-1.0.0-SNAPSHOT.jar
+# Configure the vLLM endpoint via env: VLLM=http://<host>:<port> ./e2e-weather.sh
+JAR=${JAR:-target/quarkus-chat-ui3-1.0.0-SNAPSHOT.jar}
 PORT=28123
 BASE=http://127.0.0.1:$PORT
-VLLM=http://192.0.2.10:8000
-MODEL=google/gemma-4-26B-A4B-it
+VLLM=${VLLM:-http://vllm:8000}
+MODEL=${MODEL:-google/gemma-4-26B-A4B-it}
 PROMPT='土日の天気予報をwebで調べて教えてください'
 WORKDIR=$(mktemp -d)
 SSE=$WORKDIR/sse.log

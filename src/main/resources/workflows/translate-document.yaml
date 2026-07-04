@@ -15,7 +15,7 @@ params:
     description: "Output file for the translation (absolute path)"
   wf.dir:
     description: "Directory holding the sub-workflow (translate-chunk.yaml)"
-    default: "/home/devteam/works/quarkus-chat-ui3/src/main/resources/workflows"
+    default: "/path/to/workflows"
 
 steps:
   - states: ["0", "1"]

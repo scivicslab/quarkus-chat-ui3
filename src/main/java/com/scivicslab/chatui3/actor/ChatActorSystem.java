@@ -35,8 +35,11 @@ public class ChatActorSystem {
 
     private static final Logger LOG = Logger.getLogger(ChatActorSystem.class.getName());
 
-    /** Fallback when the injected vLLM base URL is missing or unusable (blank / literal "null"). */
-    static final String DEFAULT_VLLM_BASE_URL = "http://192.0.2.10:8000";
+    /**
+     * Last-resort fallback when the injected vLLM base URL is missing or unusable (blank / literal
+     * "null"). Neutral placeholder; the real endpoint is supplied via config/env or the UI.
+     */
+    static final String DEFAULT_VLLM_BASE_URL = "http://vllm:8000";
 
     @ConfigProperty(name = "chatui3.vllm-base-url", defaultValue = DEFAULT_VLLM_BASE_URL)
     String vllmBaseUrl;

@@ -44,11 +44,11 @@ steps:
 
   - states: ["5", "6"]
     label: configure-llm
-    note: "use the free vLLM node (5.17); set the summarizer prompt"
+    note: "point the llm actor at the configured vLLM endpoint; set the summarizer prompt"
     actions:
       - actor: llm
         method: setOpenAiUrl
-        arguments: ["http://192.0.2.10:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
+        arguments: ["http://vllm:8000/v1/chat/completions", "google/gemma-4-26B-A4B-it"]
       - actor: llm
         method: setSystemPrompt
         arguments: "あなたは技術文書の要約者です。与えられた Markdown 文書を読み、検索結果に出す短い説明文を日本語で 5 行以内で書きます。文書が、ある状態から別の状態への遷移を定義する状態機械文書なら、平坦な要約ではなく〈前提条件〉と〈遷移後に成り立つこと〉を簡潔に書きます。そうでなければ、その文書が何を説明する文書かを 5 行以内で要約します。クラス名・メソッド名・コマンド等の識別子は原語のまま残します。説明文だけを出力し、前置きや見出し・記号の飾りは付けません。"

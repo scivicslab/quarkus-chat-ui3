@@ -18,7 +18,7 @@ public class E2eFileRead {
 
     static final String BASE = "http://localhost:18090/";
     // The server process runs from ~/works; the read tool is confined to that directory.
-    static final Path FILE = Path.of("/home/devteam/works/e2e-readtest.md");
+    static final Path FILE = Path.of(System.getProperty("user.home"), "works", "e2e-readtest.md");
     static final String SENTINEL = "SENTINEL_READTOOL_8842";
 
     public static void main(String[] args) throws Exception {
