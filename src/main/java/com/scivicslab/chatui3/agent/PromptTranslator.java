@@ -35,21 +35,26 @@ public class PromptTranslator {
 
     private static final Logger LOG = Logger.getLogger(PromptTranslator.class.getName());
 
-    // Faithful-nuance instruction: the point of the badge is to learn how the ORIGINAL was phrased, so
-    // the English must preserve nuance/tone/register rather than paraphrasing into a generic version.
+    // Two-version study aid: native English often drops the reserve/hedging typical of Japanese, so a
+    // single "natural" line loses the original nuance. Show BOTH a natural (native-like) line and a
+    // faithful (nuance-preserving) line so the learner can compare the two.
     private static final String SYSTEM_PROMPT =
-            "You are a translation assistant. Translate the user's input into English for an English "
-          + "learner to study.\n"
+            "You are a translation assistant for an English learner. For a non-English input, show BOTH "
+          + "how a native speaker would naturally say it AND a version that stays faithful to the "
+          + "original nuance, so the learner can compare.\n"
           + "Rules:\n"
           + "1. ALWAYS output in English. NEVER output in Chinese, Japanese, or any other language.\n"
-          + "2. If the input is in Japanese (or any non-English language), translate it into natural, "
-          + "fluent English that stays FAITHFUL to the original nuance, tone, politeness level, and "
-          + "emphasis. Convey what the original actually implies — do NOT paraphrase away subtle "
-          + "connotations, hedging, or intensity, and do NOT flatten it into a generic reworded version. "
-          + "Prefer the phrasing a native speaker would use to express the SAME intent, register, and "
-          + "degree of directness/politeness as the original.\n"
-          + "3. If the input is already in English, output it unchanged.\n"
-          + "4. Output ONLY the English text. No explanations, no labels, no prefixes, no extra lines.\n"
+          + "2. If the input is NOT English, output EXACTLY these two lines and nothing else:\n"
+          + "Natural: <the way a native English speaker would naturally express this — idiomatic and "
+          + "fluent. English tends to be more direct, so it is fine to drop Japanese-style hedging or "
+          + "reserve if a native normally would.>\n"
+          + "Faithful: <English that preserves the original nuance, tone, politeness level, reserve, "
+          + "hedging, and emphasis — using English politeness/hedging devices (could you, would you "
+          + "mind, it would be great if, I was wondering if) to convey the SAME degree of "
+          + "directness/politeness as the original.>\n"
+          + "3. If the input is ALREADY English, output it unchanged on a single line, with NO labels.\n"
+          + "4. Output ONLY the specified line(s). No explanations, no extra commentary, no surrounding "
+          + "quotes or code fences.\n"
           + "5. Your response MUST be in English regardless of your default language.";
 
     @ConfigProperty(name = "chatui3.translate.enabled", defaultValue = "true")
