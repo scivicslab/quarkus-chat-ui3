@@ -874,12 +874,30 @@
         }, 10000);
     }
 
+    // Fill a translation bubble, bolding the "Natural:" / "Faithful:" line labels. Builds DOM
+    // nodes (not innerHTML) so the model-produced text is never interpreted as markup.
+    function fillTranslationDiv(div, text) {
+        var lines = String(text == null ? '' : text).split('\n');
+        lines.forEach(function (line, i) {
+            if (i > 0) div.appendChild(document.createTextNode('\n'));
+            var m = line.match(/^(Natural|Faithful):(.*)$/);
+            if (m) {
+                var strong = document.createElement('strong');
+                strong.textContent = m[1] + ':';
+                div.appendChild(strong);
+                div.appendChild(document.createTextNode(m[2]));
+            } else {
+                div.appendChild(document.createTextNode(line));
+            }
+        });
+    }
+
     // Insert a translation bubble directly below the user message, before the
     // assistant "Waiting for response..." placeholder that was already added to the DOM.
     function insertTranslation(text) {
         var div = document.createElement('div');
         div.className = 'message translation';
-        div.textContent = text;
+        fillTranslationDiv(div, text);
         // currentAssistantMsg is the "Waiting for response..." div that sits right
         // after the user message. Inserting before it places the translation between
         // the user message and the assistant placeholder — exactly where it belongs.
@@ -1045,7 +1063,11 @@
                 } else {
                     var div = document.createElement('div');
                     div.className = 'message ' + entry.role;
-                    div.textContent = entry.text;
+                    if (entry.role === 'translation') {
+                        fillTranslationDiv(div, entry.text);
+                    } else {
+                        div.textContent = entry.text;
+                    }
                     if (entry.role === 'user') {
                         var footer = document.createElement('div');
                         footer.className = 'message-footer';
