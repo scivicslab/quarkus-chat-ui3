@@ -199,7 +199,14 @@ public class AgentActor extends IIActorRef<Object> {
         try {
             String hits = workflowIndex.search(userMessage, WORKFLOW_CATALOG_SIZE);
             if (hits == null || hits.isBlank() || hits.startsWith("error:")
-                    || hits.startsWith("Workflow index is not available")) {
+                    || hits.startsWith("Workflow index is not available")
+                    // WorkflowIndex.search() falls back to dumping the ENTIRE catalog, unfiltered,
+                    // when nothing actually matches the user's message. Surfacing that dump under a
+                    // "pre-searched for this request" framing misleads the model into treating an
+                    // arbitrary, unrelated workflow as a vetted match (observed: a doc-lookup question
+                    // triggered an unrelated translation workflow because it was simply first in the
+                    // no-match dump). Suppress the catalog entirely in that case.
+                    || hits.startsWith("No exact matches for")) {
                 return "";
             }
             return "\n\n--- Available workflows for this request (pre-searched by the harness; "
