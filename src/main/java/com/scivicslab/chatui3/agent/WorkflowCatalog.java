@@ -10,9 +10,9 @@ import java.util.List;
 /**
  * Catalogue of the agent loop's Turing Workflows, for the right-pane Workflow tab.
  *
- * <p>Phase 1 (this class): exposes the SYSTEM workflows — the loop itself ({@code agent-react}) and the
- * dispatch-target workflows — as read-only YAML loaded from the bundled {@code /workflows/} resources.
- * The system YAML is display-only and cannot be changed (per the design). A later phase adds separate,
+ * <p>Phase 1 (this class): exposes the SYSTEM workflows — currently just the default agent-loop workflow
+ * ({@code agent-react}) — as read-only YAML loaded from the bundled {@code /workflows/} resource. The
+ * system YAML is display-only and cannot be changed (per the design). A later phase adds separate,
  * user-editable extension files invoked at insertion points; this catalogue is the foundation for that.</p>
  */
 @ApplicationScoped
@@ -23,11 +23,7 @@ public class WorkflowCatalog {
 
     /** The bundled system workflows, in display order. {@code name} maps to {@code /workflows/<name>.yaml}. */
     private static final List<WorkflowInfo> SYSTEM = List.of(
-            new WorkflowInfo("agent-react",        "Agent loop (ReAct)"),
-            new WorkflowInfo("understand-project", "Understand project"),
-            new WorkflowInfo("summarize-file",     "Summarize file (sub)"),
-            new WorkflowInfo("translate-document", "Translate document"),
-            new WorkflowInfo("translate-chunk",    "Translate chunk (sub)"));
+            new WorkflowInfo("agent-react", "Agent loop (ReAct)"));
 
     /** Lists the system workflows available to view. */
     public List<WorkflowInfo> list() {

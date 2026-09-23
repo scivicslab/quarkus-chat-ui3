@@ -35,7 +35,7 @@ steps:
     actions:
       - actor: codedoc
         method: listMarkdownNoDescription
-        arguments: ["${dir}", "list:files"]
+        arguments: ["jexl: state.get('dir')", "list:files"]
 
   - states: ["3", "4"]
     label: describe-sequential
@@ -43,7 +43,11 @@ steps:
     actions:
       - actor: parallel-map
         method: run
-        arguments: ["${wf.dir}/describe-doc.yaml", "list:files", "list:status", 1]
+        arguments:
+          subWorkflow: "jexl: state.get('wf.dir') + '/describe-doc.yaml'"
+          inputList: "list:files"
+          outputList: "list:status"
+          maxParallel: 1
 
   - states: ["4", "end"]
     label: done

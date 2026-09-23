@@ -10,8 +10,10 @@ import com.scivicslab.chatui3.iolog.IoLogStore;
 import com.scivicslab.chatui3.llm.VllmClient;
 import com.scivicslab.chatui3.llm.VllmResponse;
 import com.scivicslab.chatui3.rest.ChatEvent;
-import com.scivicslab.pojoactor.core.Action;
-import com.scivicslab.pojoactor.core.ActionResult;
+import com.scivicslab.pojoactor.action.Action;
+import com.scivicslab.pojoactor.action.ActionResult;
+
+import jakarta.validation.constraints.NotNull;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorRef;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -72,22 +74,6 @@ public class AgentActor extends IIActorRef<Object> {
           + "  call read on the path itself — do NOT claim you cannot access it and do NOT ask the user\n"
           + "  for individual file paths. Paths like ~/works/X, $HOME/works/X or an absolute path all\n"
           + "  resolve into the working directory; pass them as given.\n"
-          + "- For two KNOWN, well-defined jobs, prefer 'run_known_task' over 'read', because it runs a\n"
-          + "  reliable workflow that handles even large inputs that do not fit in one read:\n"
-          + "    * Understanding/summarizing/documenting a WHOLE code project or repository\n"
-          + "      -> run_known_task(task='understand_project', path=<project directory>). It scans the\n"
-          + "      project, summarizes every file in parallel, and synthesizes one overview. Use this\n"
-          + "      instead of read when the user points at a whole project/folder to understand.\n"
-          + "    * Faithfully translating an entire document into Japanese\n"
-          + "      -> run_known_task(task='translate_document', path=<document file>).\n"
-          + "  The task result comes back as the observation; then present it as your final answer.\n"
-          + "- USER-DEFINED WORKFLOWS: for domain-specific tasks (e.g. searching OpenAlex for papers,\n"
-          + "  summarizing an arXiv paper, OCR), the workflows most relevant to THIS request are already\n"
-          + "  listed for you at the end of this message under 'Available workflows for this request'\n"
-          + "  (the harness pre-searched them from the user's message — you do NOT call any search tool).\n"
-          + "  If one of them fits the request, call 'run_workflow' with its EXACT name and a JSON params\n"
-          + "  string built from the params shown. Prefer a matching workflow over 'web_search': do NOT\n"
-          + "  web-search a task a listed workflow already performs. If none fit, ignore the list.\n"
           + "- DOC-FIRST GATE: before you BUILD ON, EXTEND, or IMPLEMENT WITH a framework, library, or\n"
           + "  system — especially before adding a new capability to one — FIRST call 'search_docs' for\n"
           + "  that framework's existing capabilities and conventions (use a specific concept word in the\n"
@@ -122,21 +108,8 @@ public class AgentActor extends IIActorRef<Object> {
     // committed turn so the chat view can show prompts entered by non-UI clients.
     private final String source;
 
-    // Dispatches known well-defined tasks (understand a project / translate a document) to a
-    // deterministic Turing Workflow. Backs the 'run_known_task' tool.
-    private final WorkflowDispatcher dispatcher;
-
-    // Lucene in-memory index over ~/works/workflow/*.yaml. The HARNESS (not the model) searches it
-    // once per turn with the user's message and injects the top matches into the system prompt, so
-    // tool discovery is deterministic rather than depending on the model choosing to call a search tool.
-    private final WorkflowIndex workflowIndex;
-    /** How many workflow matches the harness injects into the system prompt each turn. */
-    private static final int WORKFLOW_CATALOG_SIZE = 5;
-
     // per-turn working memory
     private String question;
-    // The top workflow matches for THIS turn's user message, formatted for the system prompt.
-    private String workflowCatalog = "";
     private int turnNo;   // conversation turn number, for labelling I/O log entries
     // The in-turn scratchpad in OpenAI message form: assistant tool-call messages and the
     // role:"tool" results we feed back, accumulated across steps.
@@ -150,8 +123,7 @@ public class AgentActor extends IIActorRef<Object> {
 
     public AgentActor(String name, VllmClient vllmClient, ChatUiConfig config,
             ActorRef<SseActor> sseRef, ConversationStore conversation, IIActorSystem system,
-            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source,
-            WorkflowDispatcher dispatcher, WorkflowIndex workflowIndex) {
+            IoLogStore ioLog, long sessionId, int contextWindow, ObjectMapper mapper, String source) {
         super(name, new Object(), system);
         this.vllmClient    = vllmClient;
         this.config        = config;
@@ -162,14 +134,19 @@ public class AgentActor extends IIActorRef<Object> {
         this.contextWindow = contextWindow;
         this.mapper        = mapper;
         this.source        = source;
-        this.dispatcher    = dispatcher;
-        this.workflowIndex = workflowIndex;
     }
 
     /** Initialises the turn from the user's message. */
-    @Action("start")
-    public ActionResult start(String args) {
-        this.question = parseFirstArgument(args);
+    /**
+     * What the user asked this turn.
+     *
+     * @param question the user's prompt
+     */
+    public record QuestionArgs(@NotNull String question) {}
+
+    @Action(value = "start", argsType = QuestionArgs.class)
+    public ActionResult start(QuestionArgs args) {
+        this.question = args.question();
         // Number this turn within the conversation (committed history holds user+assistant pairs).
         this.turnNo = conversation.historyTurns().size() / 2 + 1;
         this.scratchpad.clear();
@@ -177,44 +154,11 @@ public class AgentActor extends IIActorRef<Object> {
         this.finalAnswer = null;
         this.stepCount = 0;
         this.cancelled = false;
-        // Harness-side tool discovery: search the workflow index with the user's message NOW and inject
-        // the top matches into the system prompt. The model never has to decide to call a search tool.
-        this.workflowCatalog = buildWorkflowCatalog(question);
         String qPreview = question == null ? "" :
                 (question.length() > 100 ? question.substring(0, 100) + "…" : question);
         LOG.info("turn" + turnNo + ": START agent loop, source=" + source
-                + ", vllm=" + config.getVllmBaseUrl() + ", user=" + qPreview
-                + ", workflowCatalog=" + (workflowCatalog.isEmpty() ? "empty" : workflowCatalog.length() + " chars"));
+                + ", vllm=" + config.getVllmBaseUrl() + ", user=" + qPreview);
         return new ActionResult(true, "started");
-    }
-
-    /**
-     * Runs the workflow index against the user's message and formats the top matches as a system-prompt
-     * block. Returns "" when there is no index or no message, so buildMessages() can append unconditionally.
-     */
-    private String buildWorkflowCatalog(String userMessage) {
-        if (workflowIndex == null || userMessage == null || userMessage.isBlank()) {
-            return "";
-        }
-        try {
-            String hits = workflowIndex.search(userMessage, WORKFLOW_CATALOG_SIZE);
-            if (hits == null || hits.isBlank() || hits.startsWith("error:")
-                    || hits.startsWith("Workflow index is not available")
-                    // WorkflowIndex.search() falls back to dumping the ENTIRE catalog, unfiltered,
-                    // when nothing actually matches the user's message. Surfacing that dump under a
-                    // "pre-searched for this request" framing misleads the model into treating an
-                    // arbitrary, unrelated workflow as a vetted match (observed: a doc-lookup question
-                    // triggered an unrelated translation workflow because it was simply first in the
-                    // no-match dump). Suppress the catalog entirely in that case.
-                    || hits.startsWith("No exact matches for")) {
-                return "";
-            }
-            return "\n\n--- Available workflows for this request (pre-searched by the harness; "
-                 + "call run_workflow if one fits) ---\n" + hits;
-        } catch (Exception e) {
-            LOG.log(Level.FINE, "workflow catalog build failed", e);
-            return "";
-        }
     }
 
     /** Comma-joined tool names for a compact log line. */
@@ -438,12 +382,7 @@ public class AgentActor extends IIActorRef<Object> {
                  "query",
                  "A natural-language query about the internal docs. Include the SPECIFIC concept word, e.g. "
                + "'Turing Workflow サブワークフロー 呼び出し' or 'POJO-actor tell ask の使い方', not just generic terms."),
-            writeTool(),
-            knownTaskTool(),
-            // No 'search_tools' tool: the harness pre-searches the workflow index each turn and injects
-            // the matches into the system prompt (see buildWorkflowCatalog), so the model calls
-            // run_workflow directly without a model-driven discovery step.
-            runWorkflowTool());
+            writeTool());
 
     /**
      * Builds the schema for {@code write}: save text to a file under the working directory. Two
@@ -474,82 +413,6 @@ public class AgentActor extends IIActorRef<Object> {
         fn.put("description", "Save text to a file under the working directory. Use when the user asks "
                 + "to save, write, or export content to a file. Confined to the working directory.");
         fn.put("parameters", params);
-        Map<String, Object> t = new LinkedHashMap<>();
-        t.put("type", "function");
-        t.put("function", fn);
-        return t;
-    }
-
-    /**
-     * Builds the schema for {@code run_known_task}: the single dispatcher tool that routes a known,
-     * well-defined request to a deterministic Turing Workflow. Two parameters beyond {@code reason}:
-     * {@code task} (an enum selecting the workflow) and {@code path} (the target). Keeping it to one
-     * tool with a {@code task} enum caps the agent loop's tool count no matter how many workflows exist.
-     */
-    private static Map<String, Object> knownTaskTool() {
-        Map<String, Object> reason = new LinkedHashMap<>();
-        reason.put("type", "string");
-        reason.put("description", "Why you are dispatching this task now. One concise sentence.");
-        Map<String, Object> task = new LinkedHashMap<>();
-        task.put("type", "string");
-        task.put("enum", List.of("understand_project", "translate_document"));
-        task.put("description", "understand_project: scan a code project and synthesize an overview "
-                + "document (handles large projects via map-reduce). translate_document: faithfully "
-                + "translate a whole document into Japanese.");
-        Map<String, Object> path = new LinkedHashMap<>();
-        path.put("type", "string");
-        path.put("description", "The target: a project directory for understand_project, or a document "
-                + "file for translate_document. Accepts ~/works/..., $HOME/works/... or an absolute path.");
-        Map<String, Object> props = new LinkedHashMap<>();
-        props.put("reason", reason);
-        props.put("task", task);
-        props.put("path", path);
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("type", "object");
-        params.put("properties", props);
-        params.put("required", List.of("reason", "task", "path"));
-        Map<String, Object> fn = new LinkedHashMap<>();
-        fn.put("name", "run_known_task");
-        fn.put("description", "Run a reliable workflow for a KNOWN, well-defined job instead of reading "
-                + "files yourself. Use for understanding/documenting a whole code project, or faithfully "
-                + "translating a whole document. Returns the generated document as the observation.");
-        fn.put("parameters", params);
-        Map<String, Object> t = new LinkedHashMap<>();
-        t.put("type", "function");
-        t.put("function", fn);
-        return t;
-    }
-
-    /**
-     * Builds the schema for {@code run_workflow}: runs a user-defined workflow found via
-     * {@code search_tools}. Two parameters beyond {@code reason}: {@code workflow} (the name returned
-     * by search_tools) and {@code params} (a JSON-encoded object of workflow-specific key-value pairs).
-     */
-    private static Map<String, Object> runWorkflowTool() {
-        Map<String, Object> reason = new LinkedHashMap<>();
-        reason.put("type", "string");
-        reason.put("description", "Why you are running this workflow now. One concise sentence.");
-        Map<String, Object> workflow = new LinkedHashMap<>();
-        workflow.put("type", "string");
-        workflow.put("description", "Workflow name exactly as returned by search_tools (without .yaml extension).");
-        Map<String, Object> params = new LinkedHashMap<>();
-        params.put("type", "string");
-        params.put("description", "JSON object string of workflow-specific parameters as shown by search_tools, "
-                + "e.g. \"{\\\"arxiv.id\\\": \\\"2511.08544\\\"}\".");
-        Map<String, Object> props = new LinkedHashMap<>();
-        props.put("reason",   reason);
-        props.put("workflow", workflow);
-        props.put("params",   params);
-        Map<String, Object> parameters = new LinkedHashMap<>();
-        parameters.put("type", "object");
-        parameters.put("properties", props);
-        parameters.put("required", List.of("reason", "workflow", "params"));
-        Map<String, Object> fn = new LinkedHashMap<>();
-        fn.put("name", "run_workflow");
-        fn.put("description", "Run a user-defined workflow found via search_tools. Returns the workflow "
-                + "result as text for use as the observation. Always call search_tools first to get the "
-                + "correct workflow name and required parameters.");
-        fn.put("parameters", parameters);
         Map<String, Object> t = new LinkedHashMap<>();
         t.put("type", "function");
         t.put("function", fn);
@@ -593,10 +456,8 @@ public class AgentActor extends IIActorRef<Object> {
     private List<Map<String, Object>> buildMessages() {
         // Prepend the current date/time so the model does not guess "today" (it has no clock and
         // would otherwise fabricate dates in web_search queries — e.g. searching last week's weather).
-        // Append the harness-pre-searched workflow catalog so the model can call run_workflow directly
-        // without a discovery round-trip.
         Map<String, Object> system =
-                message("system", currentDatePreamble() + SYSTEM_PROMPT + workflowCatalog);
+                message("system", currentDatePreamble() + SYSTEM_PROMPT);
         Map<String, Object> user = message("user", question);
         // Budget the cross-turn history (s_budget): keep system + current user + this turn's
         // scratchpad, and fit as many recent history pairs as the token budget allows. Trimming
@@ -663,36 +524,6 @@ public class AgentActor extends IIActorRef<Object> {
             }
             return FileWriteTool.write(java.nio.file.Path.of("").toAbsolutePath(), path, content);
         }
-        if ("run_workflow".equals(tool)) {
-            // Needs two fields (workflow + params JSON), so parse raw args.
-            String workflowName = "";
-            Map<String, String> workflowParams = new LinkedHashMap<>();
-            try {
-                JsonNode root = mapper.readTree(rawArgs == null ? "{}" : rawArgs);
-                workflowName = root.path("workflow").asText("");
-                String paramsJson = root.path("params").asText("{}");
-                JsonNode paramsNode = mapper.readTree(paramsJson.isBlank() ? "{}" : paramsJson);
-                paramsNode.fields().forEachRemaining(e ->
-                        workflowParams.put(e.getKey(), e.getValue().asText("")));
-            } catch (Exception e) {
-                return "error: could not parse run_workflow arguments: " + e.getMessage();
-            }
-            return dispatcher.runExternal(workflowName, workflowParams);
-        }
-        if ("run_known_task".equals(tool)) {
-            // Dispatch a known job to a Turing Workflow. Needs two fields (task + path), so parse the
-            // raw tool arguments rather than the single extracted input.
-            String task = "";
-            String path = "";
-            try {
-                JsonNode root = mapper.readTree(rawArgs == null ? "{}" : rawArgs);
-                task = root.path("task").asText("");
-                path = root.path("path").asText("");
-            } catch (Exception e) {
-                return "error: could not parse run_known_task arguments: " + e.getMessage();
-            }
-            return dispatcher.run(task, path);
-        }
         return "error: unknown tool '" + tool + "'";
     }
 
@@ -708,7 +539,6 @@ public class AgentActor extends IIActorRef<Object> {
             case "calc" -> "expression";
             case "web_search", "search_docs" -> "query";
             case "fetch" -> "url";
-            case "run_workflow" -> "workflow";
             default -> "path";   // read, and any single-path tool
         };
         try {

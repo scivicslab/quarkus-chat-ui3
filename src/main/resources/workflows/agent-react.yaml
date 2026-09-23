@@ -20,11 +20,12 @@ description: |
 steps:
   - states: ["0", "think"]
     label: start
-    note: "Initialise the turn from the user's message (no LLM call here)."
+    note: "Initialise the turn from the user's prompt (no LLM call here)."
     actions:
       - actor: agent
         method: start
-        arguments: "${user.message}"
+        arguments:
+          question: "jexl: state.get('user.prompt')"
 
   - states: ["think", "act"]
     label: think-action
@@ -54,10 +55,8 @@ steps:
     label: run-tool
     note: |
       A tool WAS called: execute the requested tool_calls
-      (read / write / calc / web_search / fetch / search_docs / run_known_task --
-      run_known_task dispatches the known Turing Workflows understand-project or
-      translate-document), append each observation, then loop back to "think" for
-      the next LLM call.
+      (read / write / calc / web_search / fetch / search_docs), append each
+      observation, then loop back to "think" for the next LLM call.
     actions:
       - actor: agent
         method: runTool

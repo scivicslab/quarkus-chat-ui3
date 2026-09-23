@@ -81,21 +81,26 @@ public class ChatResource {
         //   - browser UI (chat-ui app.js) sends {text, ...} -> run the in-process agent loop;
         //   - entry A (Turing Workflow / ChatUi3Actor) sends {message} -> single-shot LLM primitive.
         // Map<String,Object> so the browser's boolean fields (e.g. noThink) deserialize cleanly.
-        Object textVal    = body != null ? body.get("text") : null;
-        Object messageVal = body != null ? body.get("message") : null;
-        Object sourceVal  = body != null ? body.get("source") : null;
+        Object textVal     = body != null ? body.get("text") : null;
+        Object messageVal  = body != null ? body.get("message") : null;
+        Object sourceVal   = body != null ? body.get("source") : null;
+        Object workflowVal = body != null ? body.get("workflow") : null;
         String text    = textVal != null ? String.valueOf(textVal) : null;
         String message = messageVal != null ? String.valueOf(messageVal) : null;
         // Who entered this prompt: the browser UI sends source="browser"; any other client (e.g. a
         // direct API/curl call) typically omits it, so default to "api" to mark non-UI input.
         String source  = (sourceVal != null && !String.valueOf(sourceVal).isBlank())
                 ? String.valueOf(sourceVal) : "api";
+        // Which agent-loop workflow governs this request: the caller (a human, or whatever client sent
+        // the request) chooses it explicitly; omitted means AgentLoopRunner.DEFAULT_WORKFLOW
+        // (agent-react). The model never picks this.
+        String workflow = workflowVal != null ? String.valueOf(workflowVal) : null;
 
         // Always return a JSON body: the browser does `await response.json()`, so an empty
         // body throws "Unexpected end of JSON input". The turn's content arrives via SSE; this
         // response only acknowledges acceptance.
         if (text != null && !text.isBlank()) {
-            agentLoopRunner.launch(text, source);
+            agentLoopRunner.launch(text, source, workflow);
             return Response.ok(Map.of("type", "accepted")).build();
         }
         if (message != null && !message.isBlank()) {

@@ -17,8 +17,8 @@
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
-    <pojo-actor.version>3.5.0</pojo-actor.version>
-    <turing-workflow.version>3.7.0</turing-workflow.version>
+    <pojo-actor.version>4.1.0</pojo-actor.version>
+    <turing-workflow.version>4.1.0</turing-workflow.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
     <!-- uber-jar: {artifactId}-{version}.jar, no -runner suffix -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>

@@ -40,7 +40,7 @@ steps:
     actions:
       - actor: codedoc
         method: readFileToStr
-        arguments: ["$(str:input.get)", "str:content"]
+        arguments: ["jexl: actors.get('str:input').get()", "str:content"]
 
   - states: ["5", "6"]
     label: configure-llm
@@ -58,15 +58,15 @@ steps:
     actions:
       - actor: llm
         method: callOpenAi
-        arguments: "$(str:content.get)"
+        arguments: "jexl: actors.get('str:content').get()"
 
   - states: ["7", "8"]
     label: capture
-    note: "${result} holds the generated summary"
+    note: "result holds the generated summary"
     actions:
       - actor: str:desc
         method: set
-        arguments: "${result}"
+        arguments: "jexl: result"
 
   - states: ["8", "end"]
     label: write-description
@@ -74,7 +74,7 @@ steps:
     actions:
       - actor: codedoc
         method: setFrontmatterDescription
-        arguments: ["$(str:input.get)", "str:desc"]
+        arguments: ["jexl: actors.get('str:input').get()", "str:desc"]
 
   - states: ["!end", "end"]
     label: catch-all

@@ -9,7 +9,7 @@ import com.scivicslab.chatui3.context.ConversationStore;
 import com.scivicslab.chatui3.iolog.IoLogStore;
 import com.scivicslab.chatui3.llm.VllmClient;
 import com.scivicslab.chatui3.rest.ChatEvent;
-import com.scivicslab.pojoactor.core.ActionResult;
+import com.scivicslab.pojoactor.action.ActionResult;
 import com.scivicslab.pojoactor.core.ActorRef;
 import com.scivicslab.turingworkflow.workflow.DynamicActorLoaderIIAR;
 import com.scivicslab.turingworkflow.workflow.IIActorSystem;
@@ -26,7 +26,10 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.json.JSONObject;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -38,18 +41,26 @@ import java.util.logging.Logger;
 /**
  * Runs the in-process Turing Workflow agent loop for the browser (entry B).
  *
- * <p>When the browser sends a message, {@link #launch(String)} starts the {@code agent-react.yaml}
- * workflow on a virtual thread. The workflow drives the {@link AgentActor}, which runs the ReAct
- * think -&gt; act -&gt; observe loop (LLM calls, tool execution, conversation context) and streams
- * events back to the browser's {@link SseActor}. A stuck turn is stopped via
- * {@link AgentActor#cancel()}, called from the HTTP request thread ({@link #cancelCurrent()}) or on
- * teardown (AgentActor.close()).</p>
+ * <p>When the browser sends a message, {@link #launch(String, String, String)} starts an agent-loop
+ * workflow on a virtual thread, chosen by the caller (a human), not the model. The default,
+ * {@code agent-react}, is bundled with the app so it always works with no external file present; any
+ * other name is loaded from {@code ~/works/agent-workflow/<name>.yaml}. Whichever workflow runs, it
+ * drives the {@link AgentActor}, which runs the ReAct think -&gt; act -&gt; observe loop (LLM calls,
+ * tool execution, conversation context) and streams events back to the browser's {@link SseActor}. A
+ * stuck turn is stopped via {@link AgentActor#cancel()}, called from the HTTP request thread
+ * ({@link #cancelCurrent()}) or on teardown (AgentActor.close()).</p>
  */
 @ApplicationScoped
 public class AgentLoopRunner {
 
     private static final Logger LOG = Logger.getLogger(AgentLoopRunner.class.getName());
-    private static final String WORKFLOW_RESOURCE = "/workflows/agent-react.yaml";
+    /** The default agent-loop workflow: always available, bundled with the app. */
+    public static final String DEFAULT_WORKFLOW = "agent-react";
+    private static final String DEFAULT_WORKFLOW_RESOURCE = "/workflows/agent-react.yaml";
+    /** Where a human-selected, non-default agent-loop workflow is looked up by name. */
+    private static final Path AGENT_WORKFLOW_DIR =
+            Path.of(System.getProperty("user.home", System.getenv().getOrDefault("HOME", "~")),
+                    "works", "agent-workflow");
     private static final int MAX_ITERATIONS = 1000;
 
     @Inject
@@ -63,12 +74,6 @@ public class AgentLoopRunner {
 
     @Inject
     IoLogStore ioLog;
-
-    @Inject
-    WorkflowDispatcher dispatcher;
-
-    @Inject
-    WorkflowIndex workflowIndex;
 
     @Inject
     PromptTranslator promptTranslator;
@@ -93,9 +98,15 @@ public class AgentLoopRunner {
         this.vllmClient = new VllmClient(mapper, chatSystem.getSseBatchLoggerRef(), ioLog);
     }
 
-    /** Starts the agent loop for one user message on a virtual thread (returns immediately). */
-    public void launch(String userMessage, String source) {
-        Thread.ofVirtual().name("agent-loop").start(() -> run(userMessage, source));
+    /**
+     * Starts the agent loop for one user message on a virtual thread (returns immediately).
+     *
+     * @param workflowName which agent-loop workflow governs this request, chosen by the human (or the
+     *                     caller) rather than the model; {@code null}/blank means {@link #DEFAULT_WORKFLOW}
+     */
+    public void launch(String userMessage, String source, String workflowName) {
+        String workflow = (workflowName == null || workflowName.isBlank()) ? DEFAULT_WORKFLOW : workflowName;
+        Thread.ofVirtual().name("agent-loop").start(() -> run(userMessage, source, workflow));
     }
 
     /** Cancels the currently running agent loop (if any) by stopping its in-flight LLM turn. */
@@ -153,7 +164,29 @@ public class AgentLoopRunner {
         return new ActorNode(ref.getName(), type, ref.isAlive(), children);
     }
 
-    private void run(String userMessage, String source) {
+    /**
+     * Opens the YAML source for {@code workflowName}: {@link #DEFAULT_WORKFLOW} always comes from the
+     * bundled app resource (works with no external file present); any other name is looked up as
+     * {@code ~/works/agent-workflow/<name>.yaml}.
+     *
+     * @throws IOException if a non-default name has no matching file, or the default resource is missing
+     */
+    private InputStream openAgentWorkflow(String workflowName) throws IOException {
+        if (DEFAULT_WORKFLOW.equals(workflowName)) {
+            InputStream in = getClass().getResourceAsStream(DEFAULT_WORKFLOW_RESOURCE);
+            if (in == null) {
+                throw new IOException("workflow resource not found: " + DEFAULT_WORKFLOW_RESOURCE);
+            }
+            return in;
+        }
+        Path yamlFile = AGENT_WORKFLOW_DIR.resolve(workflowName + ".yaml");
+        if (!Files.exists(yamlFile)) {
+            throw new IOException("unknown agent workflow: " + workflowName + " (looked for " + yamlFile + ")");
+        }
+        return Files.newInputStream(yamlFile);
+    }
+
+    private void run(String userMessage, String source, String workflowName) {
         ActorRef<SseActor> sseRef = chatSystem.getSseActorRef();
         // Display-only English rendering of a non-English prompt (study aid): fire-and-forget on a
         // virtual thread, emits a "translation" SSE badge when ready. The ORIGINAL prompt still drives
@@ -207,21 +240,19 @@ public class AgentLoopRunner {
             // The agent actor drives the ReAct loop (think -> act -> observe). Its close() cancels
             // any in-flight LLM call on teardown; cancelCurrent() cancels it on user request.
             AgentActor agent = new AgentActor("agent", vllmClient, config, sseRef, conversation, system,
-                    ioLog, sessionId, contextWindow, mapper, source, dispatcher, workflowIndex);
+                    ioLog, sessionId, contextWindow, mapper, source);
             system.addIIActor(agent);
             this.currentAgent = agent;   // expose for cancelCurrent()
 
-            // Make the user message available to the workflow as ${user.message}.
+            // Make the user's prompt available to the workflow as ${user.prompt} — the common input
+            // variable name for every agent-loop workflow, not just the default.
             interpreterActor.callByActionName("putJson", new JSONObject()
-                    .put("path", "user.message")
+                    .put("path", "user.prompt")
                     .put("value", userMessage)
                     .toString());
 
-            // Load the minimal agent-loop workflow from the classpath and run it.
-            try (InputStream in = getClass().getResourceAsStream(WORKFLOW_RESOURCE)) {
-                if (in == null) {
-                    throw new IllegalStateException("workflow resource not found: " + WORKFLOW_RESOURCE);
-                }
+            // Load the human-selected agent-loop workflow and run it.
+            try (InputStream in = openAgentWorkflow(workflowName)) {
                 interpreter.readYaml(in);
             }
 
