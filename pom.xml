@@ -6,19 +6,19 @@
 
   <groupId>com.scivicslab.chatui3</groupId>
   <artifactId>quarkus-chat-ui3</artifactId>
-  <version>1.0.0-SNAPSHOT</version>
+  <version>1.0.0</version>
   <packaging>jar</packaging>
 
   <properties>
     <compiler-plugin.version>3.14.0</compiler-plugin.version>
-    <maven.compiler.release>21</maven.compiler.release>
+    <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
     <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
     <quarkus.platform.version>3.28.3</quarkus.platform.version>
-    <pojo-actor.version>4.1.0</pojo-actor.version>
-    <turing-workflow.version>4.1.0</turing-workflow.version>
+    <pojo-actor.version>4.2.0</pojo-actor.version>
+    <turing-workflow.version>4.2.0</turing-workflow.version>
     <surefire-plugin.version>3.5.4</surefire-plugin.version>
     <!-- uber-jar: {artifactId}-{version}.jar, no -runner suffix -->
     <quarkus.package.jar.type>uber-jar</quarkus.package.jar.type>
@@ -53,20 +53,20 @@
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>pojo-actor</artifactId>
-      <version>${pojo-actor.version}</version>
+      <version>4.2.0</version>
     </dependency>
     <!-- In-process agent loop (entry B): chat-ui3 embeds the Turing Workflow engine. -->
     <dependency>
       <groupId>com.scivicslab</groupId>
       <artifactId>turing-workflow</artifactId>
-      <version>${turing-workflow.version}</version>
+      <version>4.2.0</version>
     </dependency>
     <!-- Complete LLM I/O logging (s_iolog): reuse the H2 log store + DatabaseAccumulator.
          Pinned to turing-workflow / pojo-actor versions matching this project. -->
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-log-db</artifactId>
-      <version>1.6.0</version>
+      <version>4.2.0</version>
     </dependency>
     <!-- Workflow dispatch (known-task automation): the agent loop dispatches well-defined requests
          (understand a project / translate a document) to map-reduce Turing Workflows. Bundling these
@@ -75,12 +75,12 @@
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-codedoc</artifactId>
-      <version>1.0.0</version>
+      <version>4.2.0</version>
     </dependency>
     <dependency>
       <groupId>com.scivicslab.turingworkflow.plugins</groupId>
       <artifactId>plugin-llm</artifactId>
-      <version>1.5.0</version>
+      <version>4.2.0</version>
     </dependency>
     <!-- search_tools: Lucene in-memory full-text index over ~/works/workflow/*.yaml.
          Three modules: core (Directory/IndexWriter/Searcher), analysis-common (StandardAnalyzer),
@@ -139,7 +139,7 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>${compiler-plugin.version}</version>
         <configuration>
-          <release>${maven.compiler.release}</release>
+          <release>25</release>
         </configuration>
       </plugin>
       <plugin>
