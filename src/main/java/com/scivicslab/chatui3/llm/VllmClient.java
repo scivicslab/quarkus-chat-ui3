@@ -262,6 +262,36 @@ public class VllmClient {
     }
 
     /**
+     * One model the server offers: its id and the longest prompt-plus-reply window it accepts,
+     * or {@code 0} when the server did not say. gpu-broker and vLLM both report the window as
+     * {@code max_model_len}; a server that omits it leaves the figure unknown rather than zero,
+     * which is why the screen shows nothing instead of "0 tokens".
+     */
+    public record Model(String id, int maxTokens) {
+    }
+
+    /**
+     * Returns the models available on the vLLM server, each with the window it accepts.
+     */
+    public List<Model> listModelsWithLimits(String vllmBaseUrl) {
+        String url = normalizeBaseUrl(vllmBaseUrl) + "/v1/models";
+        LOG.info("vLLM request: GET " + url);
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+        try {
+            HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
+            JsonNode root = mapper.readTree(response.body());
+            List<Model> models = new ArrayList<>();
+            root.path("data").forEach(m ->
+                    models.add(new Model(m.path("id").asText(), m.path("max_model_len").asInt(0))));
+            LOG.info("vLLM models response JSON: " + response.body());
+            return models;
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "vLLM listModels from " + url + " failed: " + describe(e), e);
+            throw new RuntimeException("Failed to list models from " + url + ": " + describe(e), e);
+        }
+    }
+
+    /**
      * Returns the model IDs available on the vLLM server.
      */
     public List<String> listModels(String vllmBaseUrl) {

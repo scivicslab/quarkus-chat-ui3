@@ -111,6 +111,11 @@ public class ChatActor {
         return vllmClient.listModels(config.getVllmBaseUrl());
     }
 
+    /** The same models, each with the longest window it accepts, for the model list on the screen. */
+    public List<com.scivicslab.chatui3.llm.VllmClient.Model> listModelsWithLimits() {
+        return vllmClient.listModelsWithLimits(config.getVllmBaseUrl());
+    }
+
     public void clearHistory() {
         messages.clear();
         turnCount = 0;

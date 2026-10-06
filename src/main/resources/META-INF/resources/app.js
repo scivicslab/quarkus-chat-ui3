@@ -382,9 +382,15 @@
                     opt.value = m.name;
                     opt.setAttribute('data-type', m.type);
                     if (m.type === 'local') {
+                        // The window the model accepts, when the server reported one: the number
+                        // that decides how long this conversation may get before the server
+                        // refuses it. "128K" rather than 131072 because it is read at a glance.
+                        var window = m.maxTokens
+                            ? ', ' + Math.round(m.maxTokens / 1024) + 'K'
+                            : '';
                         opt.textContent = serverCount > 1 && m.server
-                            ? m.name + ' (' + m.server + ')'
-                            : m.name + ' (local)';
+                            ? m.name + ' (' + m.server + window + ')'
+                            : m.name + ' (local' + window + ')';
                     } else {
                         opt.textContent = m.name;
                     }

@@ -192,12 +192,23 @@ public class ChatResource {
         try {
             ChatUiConfig cfg = system.getChatActorRef().ask(a -> a.getConfig()).get();
             String server = cfg.getVllmBaseUrl();
-            List<String> models = system.getChatActorRef().ask(a -> a.listModels()).get();
+            var models = system.getChatActorRef().ask(a -> a.listModelsWithLimits()).get();
             // The browser UI (chat-ui app.js) expects an array of model objects:
             // [{name, type, server}]. type=local marks vLLM-served models, which the UI
             // sends per-request. The server field lets the UI group models by endpoint.
+            // maxTokens is the window the model accepts, so the screen can say how long a
+            // conversation may get; it is absent when the server did not report one.
             List<Map<String, Object>> out = models.stream()
-                    .map(id -> Map.<String, Object>of("name", id, "type", "local", "server", server))
+                    .map(m -> {
+                        Map<String, Object> entry = new java.util.LinkedHashMap<>();
+                        entry.put("name", m.id());
+                        entry.put("type", "local");
+                        entry.put("server", server);
+                        if (m.maxTokens() > 0) {
+                            entry.put("maxTokens", m.maxTokens());
+                        }
+                        return entry;
+                    })
                     .toList();
             return Response.ok(out).build();
         } catch (Exception e) {
